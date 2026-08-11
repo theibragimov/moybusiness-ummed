@@ -10,6 +10,12 @@ import {
   getCounterparties,
 } from "@/lib/reports";
 import { monthStartYmd, monthEndYmd } from "@/lib/tashkent";
+import {
+  addManualDebt,
+  updateManualDebt,
+  deleteManualDebt,
+  type DebtDirection,
+} from "@/lib/manualDebts";
 
 export async function refreshAllData() {
   bumpCacheEpoch();
@@ -42,4 +48,20 @@ export async function getProductForecastAction(
   forecastMonths: number
 ) {
   return getProductForecast(productId, historyMonths, forecastMonths);
+}
+
+export async function addManualDebtAction(direction: DebtDirection, name: string, amount: number) {
+  const row = await addManualDebt({ direction, name, amount });
+  revalidatePath("/company");
+  return row;
+}
+
+export async function updateManualDebtAction(id: string, name: string, amount: number) {
+  await updateManualDebt(id, { name, amount });
+  revalidatePath("/company");
+}
+
+export async function deleteManualDebtAction(id: string) {
+  await deleteManualDebt(id);
+  revalidatePath("/company");
 }
