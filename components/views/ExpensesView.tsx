@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Wallet2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney } from "@/lib/format";
@@ -7,12 +8,32 @@ import { Card } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { CategoryPie } from "@/components/charts/CategoryPie";
-import { SimpleBarChart } from "@/components/charts/SimpleBarChart";
+import { MultiMoneyLineChart } from "@/components/charts/MultiMoneyLineChart";
 import type { ExpensesData } from "@/lib/reports";
 
 export function ExpensesView({ data, from, to }: { data: ExpensesData; from: string; to: string }) {
   const { t, locale } = useLanguage();
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  const [selected, setSelected] = useState<Set<string>>(new Set(data.byCategory.map((c) => c.category)));
+
+  // Re-sync selection when the period changes and brings a different category set.
+  useEffect(() => {
+    setSelected(new Set(data.byCategory.map((c) => c.category)));
+  }, [data]);
+
+  const toggle = (category: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  const selectedSeries = data.categoryDaily
+    .filter((c) => selected.has(c.category))
+    .map((c) => ({ key: c.category, name: c.category, days: c.days }));
 
   return (
     <div className="space-y-6">
@@ -35,8 +56,47 @@ export function ExpensesView({ data, from, to }: { data: ExpensesData; from: str
         </Card>
       </div>
 
-      <Card title={t.expenses.dynamics}>
-        <SimpleBarChart data={data.byDay} />
+      <Card title={t.expenses.compareTitle}>
+        <p className="mb-3 text-xs text-ink-400">{t.expenses.compareHint}</p>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setSelected(new Set(data.byCategory.map((c) => c.category)))}
+            className="rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-ink-500 hover:text-ink-900"
+          >
+            {t.expenses.selectAll}
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-ink-500 hover:text-ink-900"
+          >
+            {t.expenses.clearAll}
+          </button>
+          {data.byCategory.map((c) => {
+            const active = selected.has(c.category);
+            return (
+              <button
+                key={c.category}
+                onClick={() => toggle(c.category)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  active ? "bg-brand-500 text-white" : "bg-surface text-ink-500 hover:text-ink-900"
+                }`}
+              >
+                <span
+                  className={`h-3 w-3 rounded-[4px] border ${
+                    active ? "border-white bg-white/30" : "border-ink-300"
+                  }`}
+                />
+                {c.category}
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedSeries.length > 0 ? (
+          <MultiMoneyLineChart points={data.byDay} series={selectedSeries} />
+        ) : (
+          <p className="py-10 text-center text-sm text-ink-400">{t.expenses.noCategorySelected}</p>
+        )}
       </Card>
 
       <Card title={t.expenses.recentTitle}>

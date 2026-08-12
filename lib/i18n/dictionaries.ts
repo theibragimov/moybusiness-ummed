@@ -109,6 +109,11 @@ export const dictionaries = {
       date: "Sana",
       description: "Izoh",
       amount: "Summa",
+      compareTitle: "Xarajatlarni solishtirish",
+      compareHint: "Diagrammada ko'rinishi kerak bo'lgan toifalarni belgilang",
+      selectAll: "Barchasini belgilash",
+      clearAll: "Barchasini olib tashlash",
+      noCategorySelected: "Solishtirish uchun kamida bitta toifa belgilang",
     },
     crm: {
       title: "CRM — Kontragentlar",
@@ -253,6 +258,11 @@ export const dictionaries = {
       date: "Дата",
       description: "Комментарий",
       amount: "Сумма",
+      compareTitle: "Сравнение расходов",
+      compareHint: "Отметьте категории, которые должны отображаться на диаграмме",
+      selectAll: "Выбрать все",
+      clearAll: "Снять все",
+      noCategorySelected: "Отметьте хотя бы одну категорию для сравнения",
     },
     crm: {
       title: "CRM — Контрагенты",

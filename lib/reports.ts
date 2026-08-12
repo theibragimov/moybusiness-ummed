@@ -266,6 +266,7 @@ export interface ExpensesData {
   total: number;
   byCategory: { category: string; sum: number }[];
   byDay: { day: string; sum: number }[];
+  categoryDaily: { category: string; days: { day: string; sum: number }[] }[];
   recent: { id: string; moment: string; sum: number; category: string; description: string }[];
 }
 
@@ -284,12 +285,16 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
 
   const byCategoryMap = new Map<string, number>();
   const byDayMap = new Map<string, number>();
+  const byCategoryDayMap = new Map<string, Map<string, number>>();
   let total = 0;
   for (const r of rows) {
     const cat = categoryName(r, expenseItemNames);
-    byCategoryMap.set(cat, (byCategoryMap.get(cat) ?? 0) + r.sum);
     const day = dayOf(r.moment);
+    byCategoryMap.set(cat, (byCategoryMap.get(cat) ?? 0) + r.sum);
     byDayMap.set(day, (byDayMap.get(day) ?? 0) + r.sum);
+    const dayMap = byCategoryDayMap.get(cat) ?? new Map<string, number>();
+    dayMap.set(day, (dayMap.get(day) ?? 0) + r.sum);
+    byCategoryDayMap.set(cat, dayMap);
     total += r.sum;
   }
 
@@ -301,6 +306,12 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([day, sum]) => ({ day, sum }));
 
+  const dayLabels = byDay.map((d) => d.day);
+  const categoryDaily = byCategory.map(({ category }) => {
+    const dayMap = byCategoryDayMap.get(category) ?? new Map<string, number>();
+    return { category, days: dayLabels.map((day) => ({ day, sum: dayMap.get(day) ?? 0 })) };
+  });
+
   const recent = rows.slice(0, 100).map((r) => ({
     id: r.id,
     moment: r.moment,
@@ -309,7 +320,7 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
     description: r.description ?? "",
   }));
 
-  return { total, byCategory, byDay, recent };
+  return { total, byCategory, byDay, categoryDaily, recent };
 }
 
 // ---------- CRM / counterparties ----------
