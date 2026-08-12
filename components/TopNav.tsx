@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, BarChart3, Wallet, Users, Building2, Bell, Settings, Boxes } from "lucide-react";
+import { LayoutGrid, BarChart3, Wallet, Users, Building2, Boxes } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -31,7 +31,7 @@ export function TopNav() {
         </span>
       </Link>
 
-      <nav className="flex flex-1 flex-wrap items-center gap-1 rounded-full bg-surface p-1">
+      <nav className="no-scrollbar flex flex-1 items-center gap-1 overflow-x-auto rounded-full bg-surface p-1">
         {NAV_ITEMS.map(({ href, key, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
@@ -39,7 +39,7 @@ export function TopNav() {
               key={href}
               href={href}
               prefetch={false}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors sm:px-4 ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors sm:px-4 ${
                 active
                   ? "bg-brand-500 text-white shadow-soft"
                   : "text-ink-500 hover:bg-white hover:text-ink-900"
@@ -55,12 +55,6 @@ export function TopNav() {
       <div className="flex items-center gap-2">
         <RefreshButton />
         <LanguageSwitch />
-        <button className="hidden h-9 w-9 items-center justify-center rounded-full bg-surface text-ink-500 hover:text-ink-900 sm:flex">
-          <Bell size={16} />
-        </button>
-        <button className="hidden h-9 w-9 items-center justify-center rounded-full bg-surface text-ink-500 hover:text-ink-900 sm:flex">
-          <Settings size={16} />
-        </button>
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-xs font-semibold text-white">
           UM
         </div>

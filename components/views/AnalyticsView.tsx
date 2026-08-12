@@ -213,7 +213,7 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 rounded-full bg-white p-1.5 shadow-card">
+      <div className="no-scrollbar flex gap-2 overflow-x-auto rounded-full bg-white p-1.5 shadow-card">
         {tabs.map((tb) => (
           <button
             key={tb.key}
@@ -222,7 +222,7 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
               setAbcFilter("all");
               setSearch("");
             }}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+            className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
               tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
             }`}
           >

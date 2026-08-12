@@ -19,3 +19,11 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
