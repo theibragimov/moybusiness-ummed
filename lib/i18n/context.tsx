@@ -6,7 +6,7 @@ import { dictionaries, type Locale } from "./dictionaries";
 interface LanguageContextValue {
   locale: Locale;
   setLocale: (l: Locale) => void;
-  t: (typeof dictionaries)["uz"];
+  t: (typeof dictionaries)[Locale];
 }
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);

@@ -11,6 +11,7 @@ import type { AnalyticsData } from "@/lib/reports";
 
 type Tab = "topSold" | "topMargin" | "abc" | "slowMovers" | "forecast";
 type AbcFilter = "all" | "A" | "B" | "C";
+type AbcRow = AnalyticsData["abc"][number];
 
 const GROUP_BADGE: Record<"A" | "B" | "C", string> = {
   A: "bg-emerald-500 text-white",
@@ -156,28 +157,31 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface">
-                  {rows.map((r, i) => (
-                    <tr key={r.name + i} className={tab === "abc" && "group" in r ? GROUP_ROW[r.group] : undefined}>
+                  {rows.map((r, i) => {
+                    const abcRow = tab === "abc" ? (r as AbcRow) : null;
+                    return (
+                    <tr key={r.name + i} className={abcRow ? GROUP_ROW[abcRow.group] : undefined}>
                       <td className="py-2.5 pl-3 text-ink-400">{i + 1}</td>
                       <td className="py-2.5 max-w-[320px] truncate font-medium text-ink-900">{r.name}</td>
                       <td className="py-2.5 text-right text-ink-700">{formatNumber(r.qty, locale)}</td>
                       <td className="py-2.5 text-right text-ink-700">{money(r.revenue)}</td>
                       <td className="py-2.5 text-right text-ink-700">{money(r.profit)}</td>
                       <td className="py-2.5 text-right font-semibold text-ink-900">{formatPercent(r.margin)}</td>
-                      {tab === "abc" && "cumulative" in r && (
+                      {abcRow && (
                         <>
-                          <td className="py-2.5 text-right text-ink-500">{formatPercent(r.cumulative)}</td>
+                          <td className="py-2.5 text-right text-ink-500">{formatPercent(abcRow.cumulative)}</td>
                           <td className="py-2.5 pr-3 text-right">
                             <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[r.group]}`}
+                              className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[abcRow.group]}`}
                             >
-                              {r.group}
+                              {abcRow.group}
                             </span>
                           </td>
                         </>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
               {rows.length === 0 && <p className="py-10 text-center text-sm text-ink-400">{t.common.noData}</p>}
