@@ -10,6 +10,7 @@ import { QtyLineChart } from "@/components/charts/QtyLineChart";
 import { MultiQtyLineChart } from "@/components/charts/MultiQtyLineChart";
 import { searchProductsAction, getProductForecastAction } from "@/app/actions";
 import type { ProductForecastData, ProductSearchResult } from "@/lib/reports";
+import { Spinner } from "@/components/Spinner";
 
 const HISTORY_OPTIONS = [6, 12, 18, 24] as const;
 const FORECAST_OPTIONS = [3, 6, 12, 24] as const;
@@ -118,6 +119,7 @@ export function ProductForecastPanel() {
               placeholder={t.analytics.chooseProductPlaceholder}
               className="w-full bg-transparent text-sm outline-none placeholder:text-ink-400"
             />
+            {isSearching && <Spinner size={15} />}
           </div>
           {open && results.length > 0 && (
             <ul className="absolute z-10 mt-2 max-h-72 w-full overflow-y-auto rounded-2xl bg-white p-1.5 shadow-card">
@@ -174,13 +176,20 @@ export function ProductForecastPanel() {
       )}
 
       {selected && isLoadingForecast && !forecast && (
-        <div className="animate-pulse space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-28 rounded-3xl bg-white shadow-card" />
-            ))}
+        <div className="relative">
+          <div className="pointer-events-none sticky top-24 z-10 flex justify-center">
+            <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 shadow-card">
+              <Spinner size={16} />
+            </div>
           </div>
-          <div className="h-64 rounded-3xl bg-white shadow-card" />
+          <div className="animate-pulse space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-28 rounded-3xl bg-white shadow-card" />
+              ))}
+            </div>
+            <div className="h-64 rounded-3xl bg-white shadow-card" />
+          </div>
         </div>
       )}
 
