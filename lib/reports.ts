@@ -1,6 +1,6 @@
 import "server-only";
 import { buildFilter, entityHref, fetchAllRows, msGet, type MsListResponse } from "./moysklad";
-import { dayOf, momentFrom, momentTo, lastMonths } from "./tashkent";
+import { dayOf, momentFrom, momentTo, lastMonths, todayYmd, daysAgoYmd } from "./tashkent";
 import { cached } from "./cache";
 
 // ---------- shared types ----------
@@ -228,23 +228,89 @@ export interface ProductAnalyticsRow {
   margin: number;
 }
 
+export interface TurnoverRow extends ProductAnalyticsRow {
+  currentStock: number;
+  sellThrough: number;
+}
+
+export interface StockValueRow {
+  name: string;
+  qty: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number;
+  currentStock: number;
+  stockValue: number;
+}
+
+export interface DeadStockRow {
+  name: string;
+  currentStock: number;
+  qty6mo: number;
+  stockValue: number;
+}
+
+export interface GrowthRow extends ProductAnalyticsRow {
+  prevRevenue: number;
+  growth: number;
+}
+
 export interface AnalyticsData {
   topSold: ProductAnalyticsRow[];
   topMargin: ProductAnalyticsRow[];
+  topProfit: ProductAnalyticsRow[];
   abc: (ProductAnalyticsRow & { share: number; cumulative: number; group: "A" | "B" | "C" })[];
   abcSummary: { group: "A" | "B" | "C"; count: number; revenueShare: number }[];
+  abcTotalRevenue: number;
   slowMovers: ProductAnalyticsRow[];
+  turnover: TurnoverRow[];
+  stockValue: StockValueRow[];
+  deadStock6mo: DeadStockRow[];
+  growing: GrowthRow[];
+  declining: GrowthRow[];
 }
 
 export function getAnalyticsData(from: string, to: string): Promise<AnalyticsData> {
   return cached(`analytics:${from}:${to}`, () => getAnalyticsDataImpl(from, to));
 }
 
+/** Same-length period immediately preceding `from`..`to`, used for growth comparisons. */
+function shiftPeriodBack(from: string, to: string): { prevFrom: string; prevTo: string } {
+  const fromD = new Date(`${from}T00:00:00Z`);
+  const toD = new Date(`${to}T00:00:00Z`);
+  const days = Math.round((toD.getTime() - fromD.getTime()) / 86400000) + 1;
+  const prevToD = new Date(fromD.getTime() - 86400000);
+  const prevFromD = new Date(prevToD.getTime() - (days - 1) * 86400000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  return { prevFrom: fmt(prevFromD), prevTo: fmt(prevToD) };
+}
+
+interface StockAllLite {
+  name: string;
+  stock: number;
+  price: number;
+}
+
 async function getAnalyticsDataImpl(from: string, to: string): Promise<AnalyticsData> {
-  const rows = await fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
-    momentFrom: momentFrom(from),
-    momentTo: momentTo(to),
-  });
+  const { prevFrom, prevTo } = shiftPeriodBack(from, to);
+  const sixMonthsAgo = lastMonths(6)[0].start;
+
+  const [rows, stockRows, prevRows, rows6mo] = await Promise.all([
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(from),
+      momentTo: momentTo(to),
+    }),
+    fetchAllRows<StockAllLite>("report/stock/all", {}, 5000).catch(() => [] as StockAllLite[]),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(prevFrom),
+      momentTo: momentTo(prevTo),
+    }).catch(() => [] as ProfitByProductRow[]),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(sixMonthsAgo),
+      momentTo: momentTo(to),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
 
   const mapped: ProductAnalyticsRow[] = rows
     .filter((r) => r.sellQuantity > 0)
@@ -263,6 +329,7 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
     .filter((r) => r.revenue > 0)
     .sort((a, b) => b.margin - a.margin)
     .slice(0, 50);
+  const topProfit = [...mapped].sort((a, b) => b.profit - a.profit).slice(0, 50);
 
   const totalRevenue = mapped.reduce((s, r) => s + r.revenue, 0);
   const sortedByRevenue = [...mapped].sort((a, b) => b.revenue - a.revenue);
@@ -288,7 +355,84 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
     .sort((a, b) => a.qty - b.qty)
     .slice(0, 50);
 
-  return { topSold, topMargin, abc, abcSummary, slowMovers };
+  // ----- turnover speed: sell-through rate = qty sold / (qty sold + remaining stock) -----
+  const stockByName = new Map(stockRows.map((r) => [r.name, r]));
+  const turnover: TurnoverRow[] = mapped
+    .filter((r) => r.qty > 0)
+    .map((r) => {
+      const currentStock = stockByName.get(r.name)?.stock ?? 0;
+      const sellThrough = r.qty + currentStock > 0 ? r.qty / (r.qty + currentStock) : 0;
+      return { ...r, currentStock, sellThrough };
+    })
+    .sort((a, b) => b.sellThrough - a.sellThrough)
+    .slice(0, 50);
+
+  // ----- money tied up in stock (current stock, at cost, regardless of period sales) -----
+  const perfByName = new Map(mapped.map((r) => [r.name, r]));
+  const stockValue: StockValueRow[] = stockRows
+    .filter((r) => r.stock > 0)
+    .map((r) => {
+      const perf = perfByName.get(r.name);
+      return {
+        name: r.name,
+        qty: perf?.qty ?? 0,
+        revenue: perf?.revenue ?? 0,
+        cost: perf?.cost ?? 0,
+        profit: perf?.profit ?? 0,
+        margin: perf?.margin ?? 0,
+        currentStock: r.stock,
+        stockValue: r.stock * r.price,
+      };
+    })
+    .sort((a, b) => b.stockValue - a.stockValue)
+    .slice(0, 50);
+
+  // ----- dead stock: in stock now, but under 10 units sold across the last 6 months -----
+  const qty6moByName = new Map<string, number>();
+  for (const r of rows6mo) {
+    if (r.sellQuantity <= 0) continue;
+    qty6moByName.set(r.assortment.name, (qty6moByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+  const deadStock6mo: DeadStockRow[] = stockRows
+    .filter((r) => r.stock > 0 && (qty6moByName.get(r.name) ?? 0) < 10)
+    .map((r) => ({
+      name: r.name,
+      currentStock: r.stock,
+      qty6mo: qty6moByName.get(r.name) ?? 0,
+      stockValue: r.stock * r.price,
+    }))
+    .sort((a, b) => b.stockValue - a.stockValue)
+    .slice(0, 50);
+
+  // ----- growth vs. the immediately preceding period of the same length -----
+  const prevMap = new Map<string, number>();
+  for (const r of prevRows) {
+    if (r.sellSum <= 0) continue;
+    prevMap.set(r.assortment.name, (prevMap.get(r.assortment.name) ?? 0) + r.sellSum);
+  }
+  const growthRows: GrowthRow[] = mapped
+    .filter((r) => (prevMap.get(r.name) ?? 0) > 0)
+    .map((r) => {
+      const prevRevenue = prevMap.get(r.name)!;
+      return { ...r, prevRevenue, growth: (r.revenue - prevRevenue) / prevRevenue };
+    });
+  const growing = [...growthRows].sort((a, b) => b.growth - a.growth).slice(0, 50);
+  const declining = [...growthRows].sort((a, b) => a.growth - b.growth).slice(0, 50);
+
+  return {
+    topSold,
+    topMargin,
+    topProfit,
+    abc,
+    abcSummary,
+    abcTotalRevenue: totalRevenue,
+    slowMovers,
+    turnover,
+    stockValue,
+    deadStock6mo,
+    growing,
+    declining,
+  };
 }
 
 // ---------- expenses ----------
@@ -815,4 +959,131 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
     verdict,
     factors: { margin, growth, receivables, deadStock, stockouts },
   };
+}
+
+// ---------- warehouse ----------
+
+/**
+ * MoySklad doesn't carry a per-supplier lead time, so we assume a flat lead time
+ * (days between placing and receiving a purchase order) for every SKU. Adjust here
+ * if the real average lead time differs — it drives the reorder point / min / max levels.
+ */
+const WAREHOUSE_LEAD_TIME_DAYS = 14;
+/** Assumed days between purchase order cycles, used to size the max-stock ceiling. */
+const WAREHOUSE_ORDER_CYCLE_DAYS = 30;
+/** Below this many days of stock left is still "normal"; above it, a moving SKU is flagged slow. */
+const SLOW_MOVING_DAYS_THRESHOLD = 120;
+
+export type WarehouseStatus = "normal" | "slow" | "dead" | "expiring";
+
+export interface WarehouseRow {
+  name: string;
+  code?: string;
+  stock: number;
+  stockValue: number;
+  qty30: number;
+  avgDailySales: number;
+  daysOfStockLeft: number | null;
+  leadTimeDays: number;
+  reorderPoint: number;
+  minStock: number;
+  maxStock: number;
+  excessStock: number;
+  status: WarehouseStatus;
+  expiry: { year: number; month: number } | null;
+}
+
+export interface WarehouseData {
+  rows: WarehouseRow[];
+  summary: { status: WarehouseStatus; count: number; value: number }[];
+  leadTimeDays: number;
+}
+
+export function getWarehouseData(): Promise<WarehouseData> {
+  return cached(`warehouse:${todayYmd()}`, getWarehouseDataImpl);
+}
+
+function monthsUntil(expiry: { year: number; month: number }, todayYmdStr: string): number {
+  const year = Number(todayYmdStr.slice(0, 4));
+  const month = Number(todayYmdStr.slice(5, 7));
+  return (expiry.year - year) * 12 + (expiry.month - month);
+}
+
+async function getWarehouseDataImpl(): Promise<WarehouseData> {
+  const today = todayYmd();
+  const from30 = daysAgoYmd(29);
+  const sixMonthsAgo = lastMonths(6)[0].start;
+
+  const [stockRows, rows30, rows6mo] = await Promise.all([
+    fetchAllRows<StockAllLite>("report/stock/all", {}, 5000),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(from30),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(sixMonthsAgo),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
+
+  const qty30ByName = new Map<string, number>();
+  for (const r of rows30) {
+    if (r.sellQuantity <= 0) continue;
+    qty30ByName.set(r.assortment.name, (qty30ByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+  const qty6moByName = new Map<string, number>();
+  for (const r of rows6mo) {
+    if (r.sellQuantity <= 0) continue;
+    qty6moByName.set(r.assortment.name, (qty6moByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+
+  const rows: WarehouseRow[] = stockRows
+    .filter((r) => r.stock > 0)
+    .map((r) => {
+      const qty30 = qty30ByName.get(r.name) ?? 0;
+      const qty6mo = qty6moByName.get(r.name) ?? 0;
+      const avgDailySales = qty30 / 30;
+      const daysOfStockLeft = avgDailySales > 0 ? r.stock / avgDailySales : null;
+
+      const minStock = Math.ceil(avgDailySales * (WAREHOUSE_LEAD_TIME_DAYS / 2));
+      const reorderPoint = Math.ceil(avgDailySales * WAREHOUSE_LEAD_TIME_DAYS) + minStock;
+      const maxStock = reorderPoint + Math.ceil(avgDailySales * WAREHOUSE_ORDER_CYCLE_DAYS);
+      const excessStock = Math.max(0, r.stock - maxStock);
+
+      const expiry = parseExpiryFromName(r.name);
+      const expiringSoon = expiry !== null && (() => {
+        const away = monthsUntil(expiry, today);
+        return away >= 0 && away <= 6;
+      })();
+
+      let status: WarehouseStatus;
+      if (expiringSoon) status = "expiring";
+      else if (qty6mo === 0) status = "dead";
+      else if (daysOfStockLeft !== null && daysOfStockLeft > SLOW_MOVING_DAYS_THRESHOLD) status = "slow";
+      else status = "normal";
+
+      return {
+        name: r.name,
+        stock: r.stock,
+        stockValue: r.stock * r.price,
+        qty30,
+        avgDailySales,
+        daysOfStockLeft,
+        leadTimeDays: WAREHOUSE_LEAD_TIME_DAYS,
+        reorderPoint,
+        minStock,
+        maxStock,
+        excessStock,
+        status,
+        expiry,
+      };
+    })
+    .sort((a, b) => b.stockValue - a.stockValue);
+
+  const summary = (["expiring", "dead", "slow", "normal"] as const).map((status) => {
+    const items = rows.filter((r) => r.status === status);
+    return { status, count: items.length, value: items.reduce((s, r) => s + r.stockValue, 0) };
+  });
+
+  return { rows, summary, leadTimeDays: WAREHOUSE_LEAD_TIME_DAYS };
 }

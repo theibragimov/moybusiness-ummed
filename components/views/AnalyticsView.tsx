@@ -9,9 +9,21 @@ import { PeriodPicker } from "@/components/PeriodPicker";
 import { ProductForecastPanel } from "@/components/ProductForecastPanel";
 import type { AnalyticsData } from "@/lib/reports";
 
-type Tab = "topSold" | "topMargin" | "abc" | "slowMovers" | "forecast";
-type AbcFilter = "all" | "A" | "B" | "C";
+type Tab =
+  | "topSold"
+  | "topMargin"
+  | "topProfit"
+  | "abc"
+  | "turnover"
+  | "stockValue"
+  | "deadStock6mo"
+  | "growing"
+  | "declining"
+  | "slowMovers"
+  | "forecast";
+
 type AbcRow = AnalyticsData["abc"][number];
+type AbcFilter = "all" | "A" | "B" | "C";
 
 const GROUP_BADGE: Record<"A" | "B" | "C", string> = {
   A: "bg-emerald-500 text-white",
@@ -31,26 +43,128 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
   const [search, setSearch] = useState("");
   const [abcFilter, setAbcFilter] = useState<AbcFilter>("all");
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+  const signedPercent = (v: number) => `${v >= 0 ? "+" : ""}${formatPercent(v)}`;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "topSold", label: t.analytics.topSoldTitle },
     { key: "topMargin", label: t.analytics.topMarginTitle },
+    { key: "topProfit", label: t.analytics.topProfitTitle },
+    { key: "turnover", label: t.analytics.turnoverTitle },
+    { key: "stockValue", label: t.analytics.stockValueTitle },
+    { key: "deadStock6mo", label: t.analytics.deadStock6moTitle },
+    { key: "growing", label: t.analytics.growingTitle },
+    { key: "declining", label: t.analytics.decliningTitle },
     { key: "abc", label: t.analytics.abcTitle },
     { key: "slowMovers", label: t.analytics.deadStockTitle },
     { key: "forecast", label: t.analytics.forecastTab },
   ];
 
-  const baseRows =
+  type Column<T> = {
+    header: string;
+    right?: boolean;
+    render: (row: T) => React.ReactNode;
+  };
+
+  const nameCol = <T extends { name: string }>(): Column<T> => ({
+    header: t.analytics.product,
+    render: (r) => r.name,
+  });
+
+  const columns = useMemo(() => {
+    switch (tab) {
+      case "topSold":
+      case "topMargin":
+      case "topProfit":
+      case "slowMovers":
+        return [
+          nameCol<AnalyticsData["topSold"][number]>(),
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+          { header: t.analytics.profit, right: true, render: (r) => money(r.profit) },
+          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin) },
+        ] as Column<AnalyticsData["topSold"][number]>[];
+      case "abc":
+        return [
+          nameCol<AbcRow>(),
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+          { header: t.analytics.profit, right: true, render: (r) => money(r.profit) },
+          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin) },
+          { header: t.analytics.cumulative, right: true, render: (r) => formatPercent(r.cumulative) },
+          {
+            header: t.analytics.group,
+            right: true,
+            render: (r) => (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[r.group]}`}>{r.group}</span>
+            ),
+          },
+        ] as Column<AbcRow>[];
+      case "turnover":
+        return [
+          nameCol<AnalyticsData["turnover"][number]>(),
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
+          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
+          { header: t.analytics.sellThrough, right: true, render: (r) => formatPercent(r.sellThrough) },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+        ] as Column<AnalyticsData["turnover"][number]>[];
+      case "stockValue":
+        return [
+          nameCol<AnalyticsData["stockValue"][number]>(),
+          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
+          { header: t.analytics.stockValueCol, right: true, render: (r) => money(r.stockValue) },
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+        ] as Column<AnalyticsData["stockValue"][number]>[];
+      case "deadStock6mo":
+        return [
+          nameCol<AnalyticsData["deadStock6mo"][number]>(),
+          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
+          { header: t.analytics.qty6mo, right: true, render: (r) => formatNumber(r.qty6mo, locale) },
+          { header: t.analytics.stockValueCol, right: true, render: (r) => money(r.stockValue) },
+        ] as Column<AnalyticsData["deadStock6mo"][number]>[];
+      case "growing":
+      case "declining":
+        return [
+          nameCol<AnalyticsData["growing"][number]>(),
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
+          { header: t.analytics.prevRevenue, right: true, render: (r) => money(r.prevRevenue) },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+          {
+            header: t.analytics.growthCol,
+            right: true,
+            render: (r) => (
+              <span className={r.growth >= 0 ? "text-emerald-600" : "text-rose-600"}>{signedPercent(r.growth)}</span>
+            ),
+          },
+        ] as Column<AnalyticsData["growing"][number]>[];
+      default:
+        return [] as Column<unknown>[];
+    }
+  }, [tab, locale, t]);
+
+  const baseRows: unknown[] =
     tab === "topSold"
       ? data.topSold
       : tab === "topMargin"
         ? data.topMargin
-        : tab === "slowMovers"
-          ? data.slowMovers
-          : data.abc;
+        : tab === "topProfit"
+          ? data.topProfit
+          : tab === "slowMovers"
+            ? data.slowMovers
+            : tab === "turnover"
+              ? data.turnover
+              : tab === "stockValue"
+                ? data.stockValue
+                : tab === "deadStock6mo"
+                  ? data.deadStock6mo
+                  : tab === "growing"
+                    ? data.growing
+                    : tab === "declining"
+                      ? data.declining
+                      : data.abc;
 
   const rows = useMemo(() => {
-    let list = baseRows;
+    let list = baseRows as { name: string; group?: "A" | "B" | "C" }[];
     if (tab === "abc" && abcFilter !== "all") {
       list = data.abc.filter((r) => r.group === abcFilter);
     }
@@ -71,6 +185,10 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
 
       {tab === "abc" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-3xl bg-white p-5 shadow-card sm:col-span-3">
+            <p className="text-xs text-ink-400">{t.analytics.abcTotalRevenue}</p>
+            <p className="mt-1 text-2xl font-bold text-ink-900">{money(data.abcTotalRevenue)}</p>
+          </div>
           {data.abcSummary.map((g) => (
             <button
               key={g.group}
@@ -143,43 +261,34 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
                     <th className="pb-2 font-medium">#</th>
-                    <th className="pb-2 font-medium">{t.analytics.product}</th>
-                    <th className="pb-2 text-right font-medium">{t.analytics.qty}</th>
-                    <th className="pb-2 text-right font-medium">{t.analytics.revenue}</th>
-                    <th className="pb-2 text-right font-medium">{t.analytics.profit}</th>
-                    <th className="pb-2 text-right font-medium">{t.analytics.margin}</th>
-                    {tab === "abc" && (
-                      <>
-                        <th className="pb-2 text-right font-medium">{t.analytics.cumulative}</th>
-                        <th className="pb-2 text-right font-medium">{t.analytics.group}</th>
-                      </>
-                    )}
+                    {columns.map((c) => (
+                      <th
+                        key={c.header}
+                        className={`pb-2 font-medium ${c.right ? "text-right" : ""}`}
+                      >
+                        {c.header}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface">
                   {rows.map((r, i) => {
                     const abcRow = tab === "abc" ? (r as AbcRow) : null;
                     return (
-                    <tr key={r.name + i} className={abcRow ? GROUP_ROW[abcRow.group] : undefined}>
-                      <td className="py-2.5 pl-3 text-ink-400">{i + 1}</td>
-                      <td className="py-2.5 max-w-[320px] truncate font-medium text-ink-900">{r.name}</td>
-                      <td className="py-2.5 text-right text-ink-700">{formatNumber(r.qty, locale)}</td>
-                      <td className="py-2.5 text-right text-ink-700">{money(r.revenue)}</td>
-                      <td className="py-2.5 text-right text-ink-700">{money(r.profit)}</td>
-                      <td className="py-2.5 text-right font-semibold text-ink-900">{formatPercent(r.margin)}</td>
-                      {abcRow && (
-                        <>
-                          <td className="py-2.5 text-right text-ink-500">{formatPercent(abcRow.cumulative)}</td>
-                          <td className="py-2.5 pr-3 text-right">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[abcRow.group]}`}
-                            >
-                              {abcRow.group}
-                            </span>
+                      <tr key={r.name + i} className={abcRow ? GROUP_ROW[abcRow.group] : undefined}>
+                        <td className="py-2.5 pl-3 text-ink-400">{i + 1}</td>
+                        {columns.map((c, ci) => (
+                          <td
+                            key={c.header}
+                            className={`py-2.5 text-ink-700 ${c.right ? "text-right" : "max-w-[320px] truncate font-medium text-ink-900"} ${
+                              ci === columns.length - 1 ? "pr-3" : ""
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            {c.render(r as any)}
                           </td>
-                        </>
-                      )}
-                    </tr>
+                        ))}
+                      </tr>
                     );
                   })}
                 </tbody>

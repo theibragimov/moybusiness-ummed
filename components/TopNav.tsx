@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, BarChart3, Wallet, Users, Building2, Bell, Settings } from "lucide-react";
+import { LayoutGrid, BarChart3, Wallet, Users, Building2, Bell, Settings, Boxes } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -10,6 +10,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 const NAV_ITEMS = [
   { href: "/", key: "dashboard" as const, icon: LayoutGrid },
   { href: "/analytics", key: "analytics" as const, icon: BarChart3 },
+  { href: "/warehouse", key: "warehouse" as const, icon: Boxes },
   { href: "/expenses", key: "expenses" as const, icon: Wallet },
   { href: "/crm", key: "crm" as const, icon: Users },
   { href: "/company", key: "company" as const, icon: Building2 },
