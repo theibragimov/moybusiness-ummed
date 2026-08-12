@@ -8,6 +8,7 @@ import {
   getAnalyticsData,
   getExpensesData,
   getCounterparties,
+  getWarehouseData,
 } from "@/lib/reports";
 import { monthStartYmd, monthEndYmd } from "@/lib/tashkent";
 import {
@@ -35,6 +36,7 @@ export async function warmAllData() {
     getAnalyticsData(from, to),
     getExpensesData(from, to),
     getCounterparties(),
+    getWarehouseData(),
   ]);
 }
 

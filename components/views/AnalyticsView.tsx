@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
@@ -44,6 +44,33 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
   const [abcFilter, setAbcFilter] = useState<AbcFilter>("all");
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
   const signedPercent = (v: number) => `${v >= 0 ? "+" : ""}${formatPercent(v)}`;
+
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateTabScrollState = () => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    updateTabScrollState();
+    const el = tabScrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateTabScrollState);
+    window.addEventListener("resize", updateTabScrollState);
+    return () => {
+      el.removeEventListener("scroll", updateTabScrollState);
+      window.removeEventListener("resize", updateTabScrollState);
+    };
+  }, []);
+
+  const scrollTabs = (dir: 1 | -1) => {
+    tabScrollRef.current?.scrollBy({ left: dir * 240, behavior: "smooth" });
+  };
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "topSold", label: t.analytics.topSoldTitle },
@@ -213,22 +240,48 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
         </div>
       )}
 
-      <div className="no-scrollbar flex gap-2 overflow-x-auto rounded-full bg-white p-1.5 shadow-card">
-        {tabs.map((tb) => (
-          <button
-            key={tb.key}
-            onClick={() => {
-              setTab(tb.key);
-              setAbcFilter("all");
-              setSearch("");
-            }}
-            className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
-            }`}
-          >
-            {tb.label}
-          </button>
-        ))}
+      <div className="relative">
+        <div
+          ref={tabScrollRef}
+          className="no-scrollbar flex gap-2 overflow-x-auto rounded-full bg-white p-1.5 shadow-card"
+        >
+          {tabs.map((tb) => (
+            <button
+              key={tb.key}
+              onClick={() => {
+                setTab(tb.key);
+                setAbcFilter("all");
+                setSearch("");
+              }}
+              className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
+              }`}
+            >
+              {tb.label}
+            </button>
+          ))}
+        </div>
+
+        {canScrollLeft && (
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex w-14 items-center rounded-l-full bg-gradient-to-r from-white to-transparent pl-1.5">
+            <button
+              onClick={() => scrollTabs(-1)}
+              className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-white text-ink-500 shadow-card hover:text-ink-900"
+            >
+              <ChevronLeft size={16} />
+            </button>
+          </div>
+        )}
+        {canScrollRight && (
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex w-14 items-center justify-end rounded-r-full bg-gradient-to-l from-white to-transparent pr-1.5">
+            <button
+              onClick={() => scrollTabs(1)}
+              className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-white text-ink-500 shadow-card hover:text-ink-900"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
       </div>
 
       {tab === "forecast" ? (

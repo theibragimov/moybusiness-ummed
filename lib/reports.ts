@@ -286,10 +286,22 @@ function shiftPeriodBack(from: string, to: string): { prevFrom: string; prevTo: 
   return { prevFrom: fmt(prevFromD), prevTo: fmt(prevToD) };
 }
 
-interface StockAllLite {
+export interface StockSnapshotRow {
   name: string;
   stock: number;
   price: number;
+}
+
+/**
+ * The full-catalog `report/stock/all` snapshot doesn't depend on any period, so
+ * analytics, warehouse, and company-health all share one cached fetch instead of
+ * each re-pulling the whole catalog (previously up to 3 independent 5-page fetches
+ * per cache warm-up, which was the main cause of slow first loads).
+ */
+function getStockSnapshot(): Promise<StockSnapshotRow[]> {
+  return cached("stock-snapshot", () =>
+    fetchAllRows<StockSnapshotRow>("report/stock/all", {}, 5000).catch(() => [] as StockSnapshotRow[])
+  );
 }
 
 async function getAnalyticsDataImpl(from: string, to: string): Promise<AnalyticsData> {
@@ -301,7 +313,7 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
       momentFrom: momentFrom(from),
       momentTo: momentTo(to),
     }),
-    fetchAllRows<StockAllLite>("report/stock/all", {}, 5000).catch(() => [] as StockAllLite[]),
+    getStockSnapshot(),
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
       momentFrom: momentFrom(prevFrom),
       momentTo: momentTo(prevTo),
@@ -464,6 +476,9 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
   let total = 0;
   for (const r of rows) {
     const cat = categoryName(r, expenseItemNames);
+    // Goods purchases are COGS, not an operating expense — same exclusion as the
+    // dashboard's P&L, so this page's totals and category breakdown don't double-count them.
+    if (isGoodsPurchaseCategory(cat)) continue;
     const day = dayOf(r.moment);
     byCategoryMap.set(cat, (byCategoryMap.get(cat) ?? 0) + r.sum);
     byDayMap.set(day, (byDayMap.get(day) ?? 0) + r.sum);
@@ -822,12 +837,6 @@ export interface CompanyHealth {
   };
 }
 
-interface StockAllRow {
-  name: string;
-  stock: number;
-  price: number;
-}
-
 function parseExpiryFromName(name: string): { year: number; month: number } | null {
   const m = name.match(/(\d{4})\.(\d{1,2})\)/);
   if (!m) return null;
@@ -850,7 +859,7 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
   const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands] = await Promise.all([
     getDashboardData(todayYmd, monthStartYmd),
     getDebtsData(),
-    fetchAllRows<StockAllRow>("report/stock/all", {}, 5000),
+    getStockSnapshot(),
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
       momentFrom: momentFrom(monthStartYmd),
       momentTo: momentTo(todayYmd),
@@ -898,7 +907,7 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
   const withExpiry = stockRows
     .filter((r) => r.stock > 0)
     .map((r) => ({ ...r, expiry: parseExpiryFromName(r.name) }))
-    .filter((r): r is StockAllRow & { expiry: { year: number; month: number } } => r.expiry !== null);
+    .filter((r): r is StockSnapshotRow & { expiry: { year: number; month: number } } => r.expiry !== null);
   const expiringSoon = withExpiry
     .filter((r) => {
       const monthsAway = (r.expiry.year - curYear) * 12 + (r.expiry.month - curMonth);
@@ -1015,7 +1024,7 @@ async function getWarehouseDataImpl(): Promise<WarehouseData> {
   const sixMonthsAgo = lastMonths(6)[0].start;
 
   const [stockRows, rows30, rows6mo] = await Promise.all([
-    fetchAllRows<StockAllLite>("report/stock/all", {}, 5000),
+    getStockSnapshot(),
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
       momentFrom: momentFrom(from30),
       momentTo: momentTo(today),
