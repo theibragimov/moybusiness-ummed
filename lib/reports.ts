@@ -170,9 +170,13 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
   let operatingExpensesSum = 0;
   for (const c of monthCashouts) {
     const cat = categoryName(c, expenseItemNames);
-    expenseMap.set(cat, (expenseMap.get(cat) ?? 0) + c.sum);
     monthExpensesSum += c.sum;
-    if (!isGoodsPurchaseCategory(cat)) operatingExpensesSum += c.sum;
+    if (!isGoodsPurchaseCategory(cat)) {
+      operatingExpensesSum += c.sum;
+      // Goods purchases are COGS, already reflected in the P&L above — leave them
+      // out of the category breakdown so it matches the Expenses page.
+      expenseMap.set(cat, (expenseMap.get(cat) ?? 0) + c.sum);
+    }
   }
   const expensesByCategory = [...expenseMap.entries()]
     .sort((a, b) => b[1] - a[1])
