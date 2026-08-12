@@ -2,7 +2,7 @@
 
 import { CalendarCheck2, PackageCheck, ShoppingCart, TrendingUp, Wallet2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { StatCard } from "@/components/StatCard";
 import { Card } from "@/components/Card";
 import { SalesLineChart } from "@/components/charts/SalesLineChart";
@@ -48,6 +48,41 @@ export function DashboardView({ data }: { data: DashboardData }) {
           accent="rose"
         />
       </div>
+
+      <Card title={t.dashboard.plTitle}>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.costOfGoods}</p>
+            <p className="mt-1 text-base font-bold text-ink-900">{money(data.monthCostSum)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.grossProfit}</p>
+            <p className={`mt-1 text-base font-bold ${data.grossProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+              {money(data.grossProfit)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.grossMargin}</p>
+            <p className="mt-1 text-base font-bold text-ink-900">{formatPercent(data.grossMargin)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.operatingExpenses}</p>
+            <p className="mt-1 text-base font-bold text-ink-900">{money(data.operatingExpensesSum)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.netProfit}</p>
+            <p className={`mt-1 text-base font-bold ${data.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+              {money(data.netProfit)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-400">{t.dashboard.netMargin}</p>
+            <p className={`mt-1 text-base font-bold ${data.netMargin >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+              {formatPercent(data.netMargin)}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card title={t.dashboard.salesDynamics} className="lg:col-span-2">

@@ -52,6 +52,13 @@ function categoryName(row: CashoutRow, names: Map<string, string>): string {
   return names.get(idFromHref(href)) ?? "Boshqa";
 }
 
+// Goods purchases are already reflected in COGS (sellCostSum from the profit
+// report), so counting them again under operating expenses would double them up.
+function isGoodsPurchaseCategory(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.includes("закуп") || n.includes("покупк") || n.includes("xarid") || n.includes("zakup");
+}
+
 interface ProfitByProductRow {
   assortment: { name: string; code?: string };
   sellQuantity: number;
@@ -97,6 +104,13 @@ export interface DashboardData {
   topProducts: { name: string; qty: number; sum: number }[];
   recentShipments: { id: string; name: string; moment: string; sum: number; agent: string }[];
   expensesByCategory: { category: string; sum: number }[];
+  // P&L
+  monthCostSum: number;
+  grossProfit: number;
+  grossMargin: number;
+  operatingExpensesSum: number;
+  netProfit: number;
+  netMargin: number;
 }
 
 export function getDashboardData(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
@@ -153,10 +167,12 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
 
   const expenseMap = new Map<string, number>();
   let monthExpensesSum = 0;
+  let operatingExpensesSum = 0;
   for (const c of monthCashouts) {
     const cat = categoryName(c, expenseItemNames);
     expenseMap.set(cat, (expenseMap.get(cat) ?? 0) + c.sum);
     monthExpensesSum += c.sum;
+    if (!isGoodsPurchaseCategory(cat)) operatingExpensesSum += c.sum;
   }
   const expensesByCategory = [...expenseMap.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -170,6 +186,15 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
     agent: d.agent?.name ?? "",
   }));
 
+  // P&L: derived from the profit-by-product report so revenue/cost/profit stay
+  // internally consistent (report/dashboard/money's own figures can diverge slightly).
+  const plRevenue = profitRows.reduce((s, r) => s + r.sellSum, 0);
+  const monthCostSum = profitRows.reduce((s, r) => s + r.sellCostSum, 0);
+  const grossProfit = profitRows.reduce((s, r) => s + r.profit, 0);
+  const grossMargin = plRevenue > 0 ? grossProfit / plRevenue : 0;
+  const netProfit = grossProfit - operatingExpensesSum;
+  const netMargin = plRevenue > 0 ? netProfit / plRevenue : 0;
+
   return {
     todaySalesSum: todayDemands.reduce((s, d) => s + d.sum, 0),
     todaySalesCount: todayDemands.length,
@@ -178,6 +203,12 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
     monthShipmentsSum: monthDemands.reduce((s, d) => s + d.sum, 0),
     monthExpensesSum,
     cashBalance: moneyReport.money?.balance ?? 0,
+    monthCostSum,
+    grossProfit,
+    grossMargin,
+    operatingExpensesSum,
+    netProfit,
+    netMargin,
     salesByDay,
     topProducts,
     recentShipments,
@@ -609,5 +640,179 @@ async function getProductForecastImpl(
     historyTotalQty,
     forecastTotalQty,
     suggestedPurchaseQty: Math.max(0, Math.round(forecastTotalQty - currentStock)),
+  };
+}
+
+// ---------- company health ----------
+
+type HealthFactor = "good" | "ok" | "bad";
+
+export interface CompanyHealth {
+  cashPosition: number;
+  debitorQarz: number;
+  kreditorQarz: number;
+  revenue: number;
+  salesGrowth: number;
+  averageCheck: number;
+  grossProfit: number;
+  grossMargin: number;
+  netProfit: number;
+  netMargin: number;
+  stockValue: number;
+  deadStockCount: number;
+  deadStockValue: number;
+  stockoutCount: number;
+  topProfitable: { name: string; profit: number }[];
+  lowMargin: { name: string; margin: number; qty: number }[];
+  expiryDetectedCount: number;
+  expiringSoonCount: number;
+  expiringSoon: { name: string; year: number; month: number; stock: number }[];
+  score: number;
+  verdict: "good" | "average" | "bad";
+  factors: {
+    margin: HealthFactor;
+    growth: HealthFactor;
+    receivables: HealthFactor;
+    deadStock: HealthFactor;
+    stockouts: HealthFactor;
+  };
+}
+
+interface StockAllRow {
+  name: string;
+  stock: number;
+  price: number;
+}
+
+function parseExpiryFromName(name: string): { year: number; month: number } | null {
+  const m = name.match(/(\d{4})\.(\d{1,2})\)/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (month < 1 || month > 12 || year < 2000 || year > 2100) return null;
+  return { year, month };
+}
+
+export function getCompanyHealth(todayYmd: string, monthStartYmd: string): Promise<CompanyHealth> {
+  return cached(`company-health:${todayYmd}:${monthStartYmd}`, () =>
+    getCompanyHealthImpl(todayYmd, monthStartYmd)
+  );
+}
+
+async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Promise<CompanyHealth> {
+  const threeMonthsAgo = lastMonths(3)[0].start;
+  const prevMonth = lastMonths(2)[0];
+
+  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands] = await Promise.all([
+    getDashboardData(todayYmd, monthStartYmd),
+    getDebtsData(),
+    fetchAllRows<StockAllRow>("report/stock/all", {}, 5000),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(monthStartYmd),
+      momentTo: momentTo(todayYmd),
+    }),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(threeMonthsAgo),
+      momentTo: momentTo(todayYmd),
+    }),
+    fetchAllRows<DemandRow>("entity/demand", {
+      filter: dateRangeFilter(prevMonth.start, prevMonth.end),
+    }),
+  ]);
+
+  const revenue = dashboard.monthRevenueSum;
+  const daysElapsed = Number(todayYmd.slice(8, 10));
+  const thisMonthDailyAvg = daysElapsed > 0 ? revenue / daysElapsed : 0;
+  const prevMonthRevenue = prevMonthDemands.reduce((s, d) => s + d.sum, 0);
+  const prevMonthDays = Number(prevMonth.end.slice(8, 10));
+  const prevMonthDailyAvg = prevMonthDays > 0 ? prevMonthRevenue / prevMonthDays : 0;
+  const salesGrowth = prevMonthDailyAvg > 0 ? (thisMonthDailyAvg - prevMonthDailyAvg) / prevMonthDailyAvg : 0;
+
+  const averageCheck = dashboard.monthShipmentsCount > 0 ? revenue / dashboard.monthShipmentsCount : 0;
+
+  const stockValue = stockRows.reduce((s, r) => s + r.stock * r.price, 0);
+
+  const soldNames3mo = new Set(profitRows3mo.filter((r) => r.sellQuantity > 0).map((r) => r.assortment.name));
+  const deadStockRows = stockRows.filter((r) => r.stock > 0 && !soldNames3mo.has(r.name));
+  const deadStockCount = deadStockRows.length;
+  const deadStockValue = deadStockRows.reduce((s, r) => s + r.stock * r.price, 0);
+  const stockoutCount = stockRows.filter((r) => r.stock <= 0 && soldNames3mo.has(r.name)).length;
+
+  const topProfitable = [...profitRowsMonth]
+    .sort((a, b) => b.profit - a.profit)
+    .slice(0, 5)
+    .map((r) => ({ name: r.assortment.name, profit: r.profit }));
+  const lowMargin = profitRowsMonth
+    .filter((r) => r.sellQuantity > 0)
+    .sort((a, b) => a.margin - b.margin)
+    .slice(0, 5)
+    .map((r) => ({ name: r.assortment.name, margin: r.margin, qty: r.sellQuantity }));
+
+  const now = new Date();
+  const curYear = now.getUTCFullYear();
+  const curMonth = now.getUTCMonth() + 1;
+  const withExpiry = stockRows
+    .filter((r) => r.stock > 0)
+    .map((r) => ({ ...r, expiry: parseExpiryFromName(r.name) }))
+    .filter((r): r is StockAllRow & { expiry: { year: number; month: number } } => r.expiry !== null);
+  const expiringSoon = withExpiry
+    .filter((r) => {
+      const monthsAway = (r.expiry.year - curYear) * 12 + (r.expiry.month - curMonth);
+      return monthsAway >= 0 && monthsAway <= 6;
+    })
+    .map((r) => ({ name: r.name, year: r.expiry.year, month: r.expiry.month, stock: r.stock }));
+
+  // Scoring is an automated heuristic to flag attention areas, not financial advice.
+  let score = 0;
+  let margin: HealthFactor;
+  if (dashboard.netMargin > 0.15) {
+    margin = "good";
+    score += 2;
+  } else if (dashboard.netMargin > 0) {
+    margin = "ok";
+    score += 1;
+  } else {
+    margin = "bad";
+    score -= 2;
+  }
+
+  const growth: HealthFactor = salesGrowth >= 0 ? "good" : "bad";
+  score += growth === "good" ? 1 : -1;
+
+  const netReceivable = debts.totalDebtToUs - debts.totalDebtByUs;
+  const receivables: HealthFactor = netReceivable > revenue * 2 ? "bad" : "good";
+  score += receivables === "good" ? 1 : -1;
+
+  const deadStock: HealthFactor = stockValue > 0 && deadStockValue > stockValue * 0.3 ? "bad" : "good";
+  score += deadStock === "good" ? 1 : -1;
+
+  const stockouts: HealthFactor = stockoutCount > 5 ? "bad" : "good";
+  score += stockouts === "good" ? 1 : -1;
+
+  const verdict: "good" | "average" | "bad" = score >= 3 ? "good" : score >= 0 ? "average" : "bad";
+
+  return {
+    cashPosition: dashboard.cashBalance,
+    debitorQarz: debts.totalDebtToUs,
+    kreditorQarz: debts.totalDebtByUs,
+    revenue,
+    salesGrowth,
+    averageCheck,
+    grossProfit: dashboard.grossProfit,
+    grossMargin: dashboard.grossMargin,
+    netProfit: dashboard.netProfit,
+    netMargin: dashboard.netMargin,
+    stockValue,
+    deadStockCount,
+    deadStockValue,
+    stockoutCount,
+    topProfitable,
+    lowMargin,
+    expiryDetectedCount: withExpiry.length,
+    expiringSoonCount: expiringSoon.length,
+    expiringSoon: expiringSoon.slice(0, 20),
+    score,
+    verdict,
+    factors: { margin, growth, receivables, deadStock, stockouts },
   };
 }
