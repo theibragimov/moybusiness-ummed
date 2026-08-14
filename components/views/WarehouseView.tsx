@@ -124,48 +124,61 @@ export function WarehouseView({ data }: { data: WarehouseData }) {
 
       <Card>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-sm">
+          <table className="w-full min-w-[1360px] text-sm [font-variant-numeric:tabular-nums]">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
-                <th className="pb-2 font-medium">#</th>
-                <th className="pb-2 font-medium">{t.warehouse.product}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.stock}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.stockValue}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.qty30}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.avgDailySales}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.daysLeft}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.reorderPoint}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.leadTime}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.minStock}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.maxStock}</th>
-                <th className="pb-2 text-right font-medium">{t.warehouse.excessStock}</th>
-                <th className="pb-2 pr-3 text-right font-medium">{t.warehouse.status}</th>
+                <th className="whitespace-nowrap px-3 py-2 font-medium">#</th>
+                <th className="whitespace-nowrap px-3 py-2 font-medium">{t.warehouse.product}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.stock}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.stockValue}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.qty30}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.avgDailySales}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.daysLeft}</th>
+                <th
+                  className="whitespace-nowrap px-3 py-2 text-right font-medium"
+                  title={t.warehouse.reorderPointHint}
+                >
+                  {t.warehouse.reorderPoint}
+                </th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.minStock}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.maxStock}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.excessStock}</th>
+                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.status}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface">
               {rows.map((r, i) => (
                 <tr key={r.name + i} className={STATUS_ROW[r.status]}>
-                  <td className="py-2.5 pl-3 text-ink-400">{i + 1}</td>
-                  <td className="py-2.5 max-w-[280px] truncate font-medium text-ink-900">{r.name}</td>
-                  <td className="py-2.5 text-right text-ink-700">{formatNumber(r.stock, locale)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{money(r.stockValue)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{formatNumber(r.qty30, locale)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{r.avgDailySales.toFixed(1)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{daysLeftLabel(r)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{formatNumber(r.reorderPoint, locale)}</td>
-                  <td className="py-2.5 text-right text-ink-700">
-                    {r.leadTimeDays} {t.warehouse.days}
+                  <td className="whitespace-nowrap px-3 py-2.5 text-ink-400">{i + 1}</td>
+                  <td className="max-w-[260px] truncate px-3 py-2.5 font-medium text-ink-900">{r.name}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {formatNumber(r.stock, locale)}
                   </td>
-                  <td className="py-2.5 text-right text-ink-700">{formatNumber(r.minStock, locale)}</td>
-                  <td className="py-2.5 text-right text-ink-700">{formatNumber(r.maxStock, locale)}</td>
-                  <td className="py-2.5 text-right text-ink-700">
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">{money(r.stockValue)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {formatNumber(r.qty30, locale)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {r.avgDailySales.toFixed(1)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">{daysLeftLabel(r)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {formatNumber(r.reorderPoint, locale)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {formatNumber(r.minStock, locale)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                    {formatNumber(r.maxStock, locale)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
                     {r.excessStock > 0 ? (
                       <span className="font-semibold text-amber-600">{formatNumber(r.excessStock, locale)}</span>
                     ) : (
                       formatNumber(0, locale)
                     )}
                   </td>
-                  <td className="py-2.5 pr-3 text-right">
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${STATUS_BADGE[r.status]}`}>
                       {statusLabel[r.status]}
                     </span>
