@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
@@ -14,12 +14,9 @@ type Tab =
   | "topMargin"
   | "topProfit"
   | "abc"
-  | "turnover"
   | "stockValue"
   | "deadStock6mo"
-  | "growing"
   | "declining"
-  | "slowMovers"
   | "forecast";
 
 type AbcRow = AnalyticsData["abc"][number];
@@ -43,7 +40,14 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
   const [search, setSearch] = useState("");
   const [abcFilter, setAbcFilter] = useState<AbcFilter>("all");
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
-  const signedPercent = (v: number) => `${v >= 0 ? "+" : ""}${formatPercent(v)}`;
+
+  const [sortState, setSortState] = useState<{ colIndex: number; dir: "asc" | "desc" } | null>(null);
+  const toggleSort = (colIndex: number) => {
+    setSortState((prev) => {
+      if (!prev || prev.colIndex !== colIndex) return { colIndex, dir: "desc" };
+      return { colIndex, dir: prev.dir === "desc" ? "asc" : "desc" };
+    });
+  };
 
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -76,13 +80,10 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
     { key: "topSold", label: t.analytics.topSoldTitle },
     { key: "topMargin", label: t.analytics.topMarginTitle },
     { key: "topProfit", label: t.analytics.topProfitTitle },
-    { key: "turnover", label: t.analytics.turnoverTitle },
     { key: "stockValue", label: t.analytics.stockValueTitle },
     { key: "deadStock6mo", label: t.analytics.deadStock6moTitle },
-    { key: "growing", label: t.analytics.growingTitle },
     { key: "declining", label: t.analytics.decliningTitle },
     { key: "abc", label: t.analytics.abcTitle },
-    { key: "slowMovers", label: t.analytics.deadStockTitle },
     { key: "forecast", label: t.analytics.forecastTab },
   ];
 
@@ -90,11 +91,13 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
     header: string;
     right?: boolean;
     render: (row: T) => React.ReactNode;
+    sortValue?: (row: T) => number | string;
   };
 
   const nameCol = <T extends { name: string }>(): Column<T> => ({
     header: t.analytics.product,
     render: (r) => r.name,
+    sortValue: (r) => r.name.toLowerCase(),
   });
 
   const columns = useMemo(() => {
@@ -102,68 +105,102 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
       case "topSold":
       case "topMargin":
       case "topProfit":
-      case "slowMovers":
         return [
           nameCol<AnalyticsData["topSold"][number]>(),
-          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
-          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
-          { header: t.analytics.profit, right: true, render: (r) => money(r.profit) },
-          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin) },
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale), sortValue: (r) => r.qty },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue), sortValue: (r) => r.revenue },
+          { header: t.analytics.profit, right: true, render: (r) => money(r.profit), sortValue: (r) => r.profit },
+          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin), sortValue: (r) => r.margin },
         ] as Column<AnalyticsData["topSold"][number]>[];
       case "abc":
         return [
           nameCol<AbcRow>(),
-          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
-          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
-          { header: t.analytics.profit, right: true, render: (r) => money(r.profit) },
-          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin) },
-          { header: t.analytics.cumulative, right: true, render: (r) => formatPercent(r.cumulative) },
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale), sortValue: (r) => r.qty },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue), sortValue: (r) => r.revenue },
+          { header: t.analytics.profit, right: true, render: (r) => money(r.profit), sortValue: (r) => r.profit },
+          { header: t.analytics.margin, right: true, render: (r) => formatPercent(r.margin), sortValue: (r) => r.margin },
+          {
+            header: t.analytics.cumulative,
+            right: true,
+            render: (r) => formatPercent(r.cumulative),
+            sortValue: (r) => r.cumulative,
+          },
           {
             header: t.analytics.group,
             right: true,
             render: (r) => (
               <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[r.group]}`}>{r.group}</span>
             ),
+            sortValue: (r) => r.group,
           },
         ] as Column<AbcRow>[];
-      case "turnover":
-        return [
-          nameCol<AnalyticsData["turnover"][number]>(),
-          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
-          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
-          { header: t.analytics.sellThrough, right: true, render: (r) => formatPercent(r.sellThrough) },
-          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
-        ] as Column<AnalyticsData["turnover"][number]>[];
       case "stockValue":
         return [
           nameCol<AnalyticsData["stockValue"][number]>(),
-          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
-          { header: t.analytics.stockValueCol, right: true, render: (r) => money(r.stockValue) },
-          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
-          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+          {
+            header: t.analytics.currentStockCol,
+            right: true,
+            render: (r) => formatNumber(r.currentStock, locale),
+            sortValue: (r) => r.currentStock,
+          },
+          {
+            header: t.analytics.stockValueCol,
+            right: true,
+            render: (r) => money(r.stockValue),
+            sortValue: (r) => r.stockValue,
+          },
+          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale), sortValue: (r) => r.qty },
+          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue), sortValue: (r) => r.revenue },
         ] as Column<AnalyticsData["stockValue"][number]>[];
       case "deadStock6mo":
         return [
           nameCol<AnalyticsData["deadStock6mo"][number]>(),
-          { header: t.analytics.currentStockCol, right: true, render: (r) => formatNumber(r.currentStock, locale) },
-          { header: t.analytics.qty6mo, right: true, render: (r) => formatNumber(r.qty6mo, locale) },
-          { header: t.analytics.stockValueCol, right: true, render: (r) => money(r.stockValue) },
+          {
+            header: t.analytics.currentStockCol,
+            right: true,
+            render: (r) => formatNumber(r.currentStock, locale),
+            sortValue: (r) => r.currentStock,
+          },
+          {
+            header: t.analytics.qty6mo,
+            right: true,
+            render: (r) => formatNumber(r.qty6mo, locale),
+            sortValue: (r) => r.qty6mo,
+          },
+          {
+            header: t.analytics.stockValueCol,
+            right: true,
+            render: (r) => money(r.stockValue),
+            sortValue: (r) => r.stockValue,
+          },
         ] as Column<AnalyticsData["deadStock6mo"][number]>[];
-      case "growing":
       case "declining":
         return [
-          nameCol<AnalyticsData["growing"][number]>(),
-          { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale) },
-          { header: t.analytics.prevRevenue, right: true, render: (r) => money(r.prevRevenue) },
-          { header: t.analytics.revenue, right: true, render: (r) => money(r.revenue) },
+          nameCol<AnalyticsData["declining"][number]>(),
+          {
+            header: t.analytics.prevWeekQty,
+            right: true,
+            render: (r) => formatNumber(r.prevWeekQty, locale),
+            sortValue: (r) => r.prevWeekQty,
+          },
+          {
+            header: t.analytics.thisWeekQty,
+            right: true,
+            render: (r) => formatNumber(r.thisWeekQty, locale),
+            sortValue: (r) => r.thisWeekQty,
+          },
           {
             header: t.analytics.growthCol,
             right: true,
             render: (r) => (
-              <span className={r.growth >= 0 ? "text-emerald-600" : "text-rose-600"}>{signedPercent(r.growth)}</span>
+              <span className={r.change >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                {r.change >= 0 ? "+" : ""}
+                {formatNumber(r.change, locale)}
+              </span>
             ),
+            sortValue: (r) => r.change,
           },
-        ] as Column<AnalyticsData["growing"][number]>[];
+        ] as Column<AnalyticsData["declining"][number]>[];
       default:
         return [] as Column<unknown>[];
     }
@@ -176,19 +213,13 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
         ? data.topMargin
         : tab === "topProfit"
           ? data.topProfit
-          : tab === "slowMovers"
-            ? data.slowMovers
-            : tab === "turnover"
-              ? data.turnover
-              : tab === "stockValue"
-                ? data.stockValue
-                : tab === "deadStock6mo"
-                  ? data.deadStock6mo
-                  : tab === "growing"
-                    ? data.growing
-                    : tab === "declining"
-                      ? data.declining
-                      : data.abc;
+          : tab === "stockValue"
+            ? data.stockValue
+            : tab === "deadStock6mo"
+              ? data.deadStock6mo
+              : tab === "declining"
+                ? data.declining
+                : data.abc;
 
   const rows = useMemo(() => {
     let list = baseRows as { name: string; group?: "A" | "B" | "C" }[];
@@ -197,8 +228,23 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
     }
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((r) => r.name.toLowerCase().includes(q));
+    if (sortState) {
+      const col = columns[sortState.colIndex];
+      if (col?.sortValue) {
+        const dir = sortState.dir === "asc" ? 1 : -1;
+        const sortValue = col.sortValue as (row: { name: string; group?: "A" | "B" | "C" }) => number | string;
+        list = [...list].sort((a, b) => {
+          const av = sortValue(a);
+          const bv = sortValue(b);
+          if (typeof av === "string" || typeof bv === "string") {
+            return String(av).localeCompare(String(bv)) * dir;
+          }
+          return (av - bv) * dir;
+        });
+      }
+    }
     return list;
-  }, [baseRows, tab, abcFilter, search, data.abc]);
+  }, [baseRows, tab, abcFilter, search, data.abc, sortState, columns]);
 
   return (
     <div className="space-y-6">
@@ -252,6 +298,7 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
                 setTab(tb.key);
                 setAbcFilter("all");
                 setSearch("");
+                setSortState(null);
               }}
               className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
@@ -314,12 +361,27 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
                     <th className="pb-2 font-medium">#</th>
-                    {columns.map((c) => (
+                    {columns.map((c, ci) => (
                       <th
                         key={c.header}
-                        className={`pb-2 font-medium ${c.right ? "text-right" : ""}`}
+                        className={`pb-2 font-medium ${c.right ? "text-right" : ""} ${
+                          c.sortValue ? "cursor-pointer select-none hover:text-ink-700" : ""
+                        }`}
+                        onClick={() => c.sortValue && toggleSort(ci)}
                       >
-                        {c.header}
+                        <span className={`inline-flex items-center gap-1 ${c.right ? "flex-row-reverse" : ""}`}>
+                          {c.header}
+                          {c.sortValue &&
+                            (sortState?.colIndex === ci ? (
+                              sortState.dir === "desc" ? (
+                                <ArrowDown size={12} />
+                              ) : (
+                                <ArrowUp size={12} />
+                              )
+                            ) : (
+                              <ArrowUpDown size={12} className="opacity-40" />
+                            ))}
+                        </span>
                       </th>
                     ))}
                   </tr>

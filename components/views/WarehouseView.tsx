@@ -143,7 +143,9 @@ export function WarehouseView({ data }: { data: WarehouseData }) {
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.minStock}</th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.maxStock}</th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.excessStock}</th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.status}</th>
+                <th className="min-w-[140px] whitespace-nowrap px-3 py-2 text-right font-medium">
+                  {t.warehouse.status}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface">
@@ -179,7 +181,9 @@ export function WarehouseView({ data }: { data: WarehouseData }) {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${STATUS_BADGE[r.status]}`}>
+                    <span
+                      className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${STATUS_BADGE[r.status]}`}
+                    >
                       {statusLabel[r.status]}
                     </span>
                   </td>

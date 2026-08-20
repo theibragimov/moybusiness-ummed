@@ -232,11 +232,6 @@ export interface ProductAnalyticsRow {
   margin: number;
 }
 
-export interface TurnoverRow extends ProductAnalyticsRow {
-  currentStock: number;
-  sellThrough: number;
-}
-
 export interface StockValueRow {
   name: string;
   qty: number;
@@ -255,9 +250,11 @@ export interface DeadStockRow {
   stockValue: number;
 }
 
-export interface GrowthRow extends ProductAnalyticsRow {
-  prevRevenue: number;
-  growth: number;
+export interface WeeklyDeclineRow {
+  name: string;
+  prevWeekQty: number;
+  thisWeekQty: number;
+  change: number;
 }
 
 export interface AnalyticsData {
@@ -267,27 +264,13 @@ export interface AnalyticsData {
   abc: (ProductAnalyticsRow & { share: number; cumulative: number; group: "A" | "B" | "C" })[];
   abcSummary: { group: "A" | "B" | "C"; count: number; revenueShare: number }[];
   abcTotalRevenue: number;
-  slowMovers: ProductAnalyticsRow[];
-  turnover: TurnoverRow[];
   stockValue: StockValueRow[];
   deadStock6mo: DeadStockRow[];
-  growing: GrowthRow[];
-  declining: GrowthRow[];
+  declining: WeeklyDeclineRow[];
 }
 
 export function getAnalyticsData(from: string, to: string): Promise<AnalyticsData> {
   return cached(`analytics:${from}:${to}`, () => getAnalyticsDataImpl(from, to));
-}
-
-/** Same-length period immediately preceding `from`..`to`, used for growth comparisons. */
-function shiftPeriodBack(from: string, to: string): { prevFrom: string; prevTo: string } {
-  const fromD = new Date(`${from}T00:00:00Z`);
-  const toD = new Date(`${to}T00:00:00Z`);
-  const days = Math.round((toD.getTime() - fromD.getTime()) / 86400000) + 1;
-  const prevToD = new Date(fromD.getTime() - 86400000);
-  const prevFromD = new Date(prevToD.getTime() - (days - 1) * 86400000);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return { prevFrom: fmt(prevFromD), prevTo: fmt(prevToD) };
 }
 
 export interface StockSnapshotRow {
@@ -309,22 +292,29 @@ function getStockSnapshot(): Promise<StockSnapshotRow[]> {
 }
 
 async function getAnalyticsDataImpl(from: string, to: string): Promise<AnalyticsData> {
-  const { prevFrom, prevTo } = shiftPeriodBack(from, to);
   const sixMonthsAgo = lastMonths(6)[0].start;
+  const today = todayYmd();
+  const thisWeekFrom = daysAgoYmd(6);
+  const prevWeekFrom = daysAgoYmd(13);
+  const prevWeekTo = daysAgoYmd(7);
 
-  const [rows, stockRows, prevRows, rows6mo] = await Promise.all([
+  const [rows, stockRows, rows6mo, thisWeekRows, prevWeekRows] = await Promise.all([
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
       momentFrom: momentFrom(from),
       momentTo: momentTo(to),
     }),
     getStockSnapshot(),
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
-      momentFrom: momentFrom(prevFrom),
-      momentTo: momentTo(prevTo),
+      momentFrom: momentFrom(sixMonthsAgo),
+      momentTo: momentTo(today),
     }).catch(() => [] as ProfitByProductRow[]),
     fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
-      momentFrom: momentFrom(sixMonthsAgo),
-      momentTo: momentTo(to),
+      momentFrom: momentFrom(thisWeekFrom),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+      momentFrom: momentFrom(prevWeekFrom),
+      momentTo: momentTo(prevWeekTo),
     }).catch(() => [] as ProfitByProductRow[]),
   ]);
 
@@ -340,12 +330,9 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
       margin: r.margin,
     }));
 
-  const topSold = [...mapped].sort((a, b) => b.qty - a.qty).slice(0, 50);
-  const topMargin = [...mapped]
-    .filter((r) => r.revenue > 0)
-    .sort((a, b) => b.margin - a.margin)
-    .slice(0, 50);
-  const topProfit = [...mapped].sort((a, b) => b.profit - a.profit).slice(0, 50);
+  const topSold = [...mapped].sort((a, b) => b.qty - a.qty);
+  const topMargin = [...mapped].filter((r) => r.revenue > 0).sort((a, b) => b.margin - a.margin);
+  const topProfit = [...mapped].sort((a, b) => b.profit - a.profit);
 
   const totalRevenue = mapped.reduce((s, r) => s + r.revenue, 0);
   const sortedByRevenue = [...mapped].sort((a, b) => b.revenue - a.revenue);
@@ -366,23 +353,6 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
     };
   });
 
-  const slowMovers = [...mapped]
-    .filter((r) => r.qty > 0)
-    .sort((a, b) => a.qty - b.qty)
-    .slice(0, 50);
-
-  // ----- turnover speed: sell-through rate = qty sold / (qty sold + remaining stock) -----
-  const stockByName = new Map(stockRows.map((r) => [r.name, r]));
-  const turnover: TurnoverRow[] = mapped
-    .filter((r) => r.qty > 0)
-    .map((r) => {
-      const currentStock = stockByName.get(r.name)?.stock ?? 0;
-      const sellThrough = r.qty + currentStock > 0 ? r.qty / (r.qty + currentStock) : 0;
-      return { ...r, currentStock, sellThrough };
-    })
-    .sort((a, b) => b.sellThrough - a.sellThrough)
-    .slice(0, 50);
-
   // ----- money tied up in stock (current stock, at cost, regardless of period sales) -----
   const perfByName = new Map(mapped.map((r) => [r.name, r]));
   const stockValue: StockValueRow[] = stockRows
@@ -400,40 +370,44 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
         stockValue: r.stock * r.price,
       };
     })
-    .sort((a, b) => b.stockValue - a.stockValue)
-    .slice(0, 50);
+    .sort((a, b) => b.stockValue - a.stockValue);
 
-  // ----- dead stock: in stock now, but under 10 units sold across the last 6 months -----
+  // ----- dead stock: in stock now, but not a single unit sold in the last 6 real months -----
   const qty6moByName = new Map<string, number>();
   for (const r of rows6mo) {
     if (r.sellQuantity <= 0) continue;
     qty6moByName.set(r.assortment.name, (qty6moByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
   }
   const deadStock6mo: DeadStockRow[] = stockRows
-    .filter((r) => r.stock > 0 && (qty6moByName.get(r.name) ?? 0) < 10)
+    .filter((r) => r.stock > 0 && (qty6moByName.get(r.name) ?? 0) === 0)
     .map((r) => ({
       name: r.name,
       currentStock: r.stock,
       qty6mo: qty6moByName.get(r.name) ?? 0,
       stockValue: r.stock * r.price,
     }))
-    .sort((a, b) => b.stockValue - a.stockValue)
-    .slice(0, 50);
+    .sort((a, b) => b.stockValue - a.stockValue);
 
-  // ----- growth vs. the immediately preceding period of the same length -----
-  const prevMap = new Map<string, number>();
-  for (const r of prevRows) {
-    if (r.sellSum <= 0) continue;
-    prevMap.set(r.assortment.name, (prevMap.get(r.assortment.name) ?? 0) + r.sellSum);
+  // ----- week-over-week decline: sold less this week (last 7 days) than the week before -----
+  const thisWeekMap = new Map<string, number>();
+  for (const r of thisWeekRows) {
+    if (r.sellQuantity <= 0) continue;
+    thisWeekMap.set(r.assortment.name, (thisWeekMap.get(r.assortment.name) ?? 0) + r.sellQuantity);
   }
-  const growthRows: GrowthRow[] = mapped
-    .filter((r) => (prevMap.get(r.name) ?? 0) > 0)
-    .map((r) => {
-      const prevRevenue = prevMap.get(r.name)!;
-      return { ...r, prevRevenue, growth: (r.revenue - prevRevenue) / prevRevenue };
-    });
-  const growing = [...growthRows].sort((a, b) => b.growth - a.growth).slice(0, 50);
-  const declining = [...growthRows].sort((a, b) => a.growth - b.growth).slice(0, 50);
+  const prevWeekMap = new Map<string, number>();
+  for (const r of prevWeekRows) {
+    if (r.sellQuantity <= 0) continue;
+    prevWeekMap.set(r.assortment.name, (prevWeekMap.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+  const declineNames = new Set([...thisWeekMap.keys(), ...prevWeekMap.keys()]);
+  const declining: WeeklyDeclineRow[] = [...declineNames]
+    .map((name) => {
+      const prevWeekQty = prevWeekMap.get(name) ?? 0;
+      const thisWeekQty = thisWeekMap.get(name) ?? 0;
+      return { name, prevWeekQty, thisWeekQty, change: thisWeekQty - prevWeekQty };
+    })
+    .filter((r) => r.thisWeekQty < r.prevWeekQty)
+    .sort((a, b) => a.change - b.change);
 
   return {
     topSold,
@@ -442,11 +416,8 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
     abc,
     abcSummary,
     abcTotalRevenue: totalRevenue,
-    slowMovers,
-    turnover,
     stockValue,
     deadStock6mo,
-    growing,
     declining,
   };
 }
