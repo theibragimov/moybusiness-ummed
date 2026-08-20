@@ -9,7 +9,7 @@ import { StatCard } from "@/components/StatCard";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import type { CounterpartyRow, CounterpartySegment, CustomerAbcData } from "@/lib/reports";
 
-type Tab = "customers" | "suppliers" | "employees" | "abc";
+type Tab = "customers" | "suppliers" | "employees" | "abc" | "inactive";
 type SortKey = "name" | "demandsCount" | "demandsSum" | "averageReceipt" | "lastDemandDate" | "balance";
 type SortDir = "asc" | "desc";
 type AbcFilter = "all" | "A" | "B" | "C";
@@ -282,16 +282,119 @@ function AbcSection({ data, from, to }: { data: CustomerAbcData; from: string; t
   );
 }
 
+function daysBetween(a: string, b: string): number {
+  const d1 = new Date(`${a}T00:00:00Z`).getTime();
+  const d2 = new Date(`${b}T00:00:00Z`).getTime();
+  return Math.round((d2 - d1) / 86400000);
+}
+
+function InactiveSection({
+  customers,
+  today,
+  oneMonthAgo,
+  threeMonthsAgo,
+}: {
+  customers: CounterpartyRow[];
+  today: string;
+  oneMonthAgo: string;
+  threeMonthsAgo: string;
+}) {
+  const { t, locale } = useLanguage();
+  const [threshold, setThreshold] = useState<"1mo" | "3mo">("1mo");
+  const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  const cutoff = threshold === "1mo" ? oneMonthAgo : threeMonthsAgo;
+  const rows = useMemo(
+    () =>
+      customers
+        .filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < cutoff)
+        .sort((a, b) => (a.lastDemandDate ?? "").localeCompare(b.lastDemandDate ?? "")),
+    [customers, cutoff]
+  );
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-ink-900">{t.crm.inactiveTitle}</h2>
+        <p className="mt-1 text-sm text-ink-500">{t.crm.inactiveSubtitle}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setThreshold("1mo")}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+            threshold === "1mo"
+              ? "bg-brand-500 text-white shadow-soft"
+              : "bg-white text-ink-500 shadow-card hover:text-ink-900"
+          }`}
+        >
+          {t.crm.inactive1mo}
+        </button>
+        <button
+          onClick={() => setThreshold("3mo")}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+            threshold === "3mo"
+              ? "bg-brand-500 text-white shadow-soft"
+              : "bg-white text-ink-500 shadow-card hover:text-ink-900"
+          }`}
+        >
+          {t.crm.inactive3mo}
+        </button>
+      </div>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
+                <th className="pb-2 font-medium">{t.crm.name}</th>
+                <th className="pb-2 font-medium">{t.crm.lastDemand}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.daysSincePurchase}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.balance}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface">
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="py-2.5 max-w-[280px] truncate font-medium text-ink-900">{r.name}</td>
+                  <td className="py-2.5 text-ink-500">{r.lastDemandDate?.slice(0, 10)}</td>
+                  <td className="py-2.5 text-right text-ink-700">
+                    {formatNumber(daysBetween(r.lastDemandDate!.slice(0, 10), today), locale)}
+                  </td>
+                  <td
+                    className={`py-2.5 text-right font-semibold ${
+                      r.balance < 0 ? "text-rose-500" : r.balance > 0 ? "text-emerald-500" : "text-ink-400"
+                    }`}
+                  >
+                    {money(r.balance)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <p className="py-10 text-center text-sm text-ink-400">{t.common.noData}</p>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 export function CrmView({
   rows,
   abc,
   from,
   to,
+  today,
+  oneMonthAgo,
+  threeMonthsAgo,
 }: {
   rows: CounterpartyRow[];
   abc: CustomerAbcData;
   from: string;
   to: string;
+  today: string;
+  oneMonthAgo: string;
+  threeMonthsAgo: string;
 }) {
   const { t, locale } = useLanguage();
   const [tab, setTab] = useState<Tab>("customers");
@@ -306,6 +409,7 @@ export function CrmView({
     { key: "suppliers", label: t.crm.suppliersTab },
     { key: "employees", label: t.crm.employeesTab },
     { key: "abc", label: t.crm.abcTab },
+    { key: "inactive", label: t.crm.inactiveTab },
   ];
 
   return (
@@ -339,6 +443,14 @@ export function CrmView({
       {tab === "suppliers" && <CounterpartyTable rows={suppliers} />}
       {tab === "employees" && <CounterpartyTable rows={employees} />}
       {tab === "abc" && <AbcSection data={abc} from={from} to={to} />}
+      {tab === "inactive" && (
+        <InactiveSection
+          customers={customers}
+          today={today}
+          oneMonthAgo={oneMonthAgo}
+          threeMonthsAgo={threeMonthsAgo}
+        />
+      )}
     </div>
   );
 }
