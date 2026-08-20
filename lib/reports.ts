@@ -83,6 +83,20 @@ function dateRangeFilter(from: string, to: string) {
   return buildFilter([`moment>=${momentFrom(from)}`, `moment<=${momentTo(to)}`]);
 }
 
+// Expenses can be recorded as either a cash outflow (entity/cashout) or a bank
+// outgoing payment (entity/paymentout) — both are real expenses in MoySklad's own
+// "Платежи" list, so anything reading expenses must pull both or it silently
+// undercounts categories that are usually paid by card/bank transfer.
+async function listCashOutflows(from: string, to: string): Promise<CashoutRow[]> {
+  const [cashouts, paymentouts] = await Promise.all([
+    fetchAllRows<CashoutRow>("entity/cashout", { filter: dateRangeFilter(from, to) }),
+    fetchAllRows<CashoutRow>("entity/paymentout", { filter: dateRangeFilter(from, to) }).catch(
+      () => [] as CashoutRow[]
+    ),
+  ]);
+  return [...cashouts, ...paymentouts].sort((a, b) => (a.moment < b.moment ? 1 : -1));
+}
+
 async function listDemands(from: string, to: string): Promise<DemandRow[]> {
   return fetchAllRows<DemandRow>("entity/demand", {
     filter: dateRangeFilter(from, to),
@@ -120,9 +134,7 @@ export function getDashboardData(todayYmd: string, monthStartYmd: string): Promi
 async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
   const [monthDemands, monthCashouts, moneyReport, expenseItemNames, recentDemandsExpanded] = await Promise.all([
     listDemands(monthStartYmd, todayYmd),
-    fetchAllRows<CashoutRow>("entity/cashout", {
-      filter: dateRangeFilter(monthStartYmd, todayYmd),
-    }),
+    listCashOutflows(monthStartYmd, todayYmd),
     msGet<{ money: { balance: number } }>("report/dashboard/money", {
       momentFrom: momentFrom(todayYmd),
       momentTo: momentTo(todayYmd),
@@ -153,7 +165,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
 
   const productMap = new Map<string, { qty: number; sum: number }>();
   // top products this month, from the profit-by-product report (already aggregated server-side)
-  const profitRows = await fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+  const profitRows = await fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
     momentFrom: momentFrom(monthStartYmd),
     momentTo: momentTo(todayYmd),
   }).catch(() => [] as ProfitByProductRow[]);
@@ -259,8 +271,6 @@ export interface WeeklyDeclineRow {
 
 export interface AnalyticsData {
   topSold: ProductAnalyticsRow[];
-  topMargin: ProductAnalyticsRow[];
-  topProfit: ProductAnalyticsRow[];
   abc: (ProductAnalyticsRow & { share: number; cumulative: number; group: "A" | "B" | "C" })[];
   abcSummary: { group: "A" | "B" | "C"; count: number; revenueShare: number }[];
   abcTotalRevenue: number;
@@ -299,20 +309,20 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
   const prevWeekTo = daysAgoYmd(7);
 
   const [rows, stockRows, rows6mo, thisWeekRows, prevWeekRows] = await Promise.all([
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(from),
       momentTo: momentTo(to),
     }),
     getStockSnapshot(),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(sixMonthsAgo),
       momentTo: momentTo(today),
     }).catch(() => [] as ProfitByProductRow[]),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(thisWeekFrom),
       momentTo: momentTo(today),
     }).catch(() => [] as ProfitByProductRow[]),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(prevWeekFrom),
       momentTo: momentTo(prevWeekTo),
     }).catch(() => [] as ProfitByProductRow[]),
@@ -331,8 +341,6 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
     }));
 
   const topSold = [...mapped].sort((a, b) => b.qty - a.qty);
-  const topMargin = [...mapped].filter((r) => r.revenue > 0).sort((a, b) => b.margin - a.margin);
-  const topProfit = [...mapped].sort((a, b) => b.profit - a.profit);
 
   const totalRevenue = mapped.reduce((s, r) => s + r.revenue, 0);
   const sortedByRevenue = [...mapped].sort((a, b) => b.revenue - a.revenue);
@@ -411,8 +419,6 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
 
   return {
     topSold,
-    topMargin,
-    topProfit,
     abc,
     abcSummary,
     abcTotalRevenue: totalRevenue,
@@ -437,13 +443,7 @@ export function getExpensesData(from: string, to: string): Promise<ExpensesData>
 }
 
 async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesData> {
-  const [rows, expenseItemNames] = await Promise.all([
-    fetchAllRows<CashoutRow>("entity/cashout", {
-      filter: dateRangeFilter(from, to),
-      order: "moment,desc",
-    }),
-    getExpenseItemNames(),
-  ]);
+  const [rows, expenseItemNames] = await Promise.all([listCashOutflows(from, to), getExpenseItemNames()]);
 
   const byCategoryMap = new Map<string, number>();
   const byDayMap = new Map<string, number>();
@@ -661,7 +661,7 @@ function seasonalTrendForecast(qtys: number[], historyMonthIndexes: number[], fu
 async function monthlySoldQty(assortmentHref: string, months: { start: string; end: string }[]): Promise<number[]> {
   const rows = await Promise.all(
     months.map((m) =>
-      msGet<MsListResponse<ProfitByProductRow>>("report/profit/byproduct", {
+      msGet<MsListResponse<ProfitByProductRow>>("report/profit/byvariant", {
         momentFrom: momentFrom(m.start),
         momentTo: momentTo(m.end),
         filter: buildFilter([`product=${assortmentHref}`]),
@@ -835,11 +835,11 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
     getDashboardData(todayYmd, monthStartYmd),
     getDebtsData(),
     getStockSnapshot(),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(monthStartYmd),
       momentTo: momentTo(todayYmd),
     }),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(threeMonthsAgo),
       momentTo: momentTo(todayYmd),
     }),
@@ -1000,11 +1000,11 @@ async function getWarehouseDataImpl(): Promise<WarehouseData> {
 
   const [stockRows, rows30, rows6mo] = await Promise.all([
     getStockSnapshot(),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(from30),
       momentTo: momentTo(today),
     }).catch(() => [] as ProfitByProductRow[]),
-    fetchAllRows<ProfitByProductRow>("report/profit/byproduct", {
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
       momentFrom: momentFrom(sixMonthsAgo),
       momentTo: momentTo(today),
     }).catch(() => [] as ProfitByProductRow[]),

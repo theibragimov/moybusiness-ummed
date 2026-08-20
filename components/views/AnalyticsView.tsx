@@ -9,15 +9,7 @@ import { PeriodPicker } from "@/components/PeriodPicker";
 import { ProductForecastPanel } from "@/components/ProductForecastPanel";
 import type { AnalyticsData } from "@/lib/reports";
 
-type Tab =
-  | "topSold"
-  | "topMargin"
-  | "topProfit"
-  | "abc"
-  | "stockValue"
-  | "deadStock6mo"
-  | "declining"
-  | "forecast";
+type Tab = "topSold" | "abc" | "stockValue" | "deadStock6mo" | "declining" | "forecast";
 
 type AbcRow = AnalyticsData["abc"][number];
 type AbcFilter = "all" | "A" | "B" | "C";
@@ -78,8 +70,6 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "topSold", label: t.analytics.topSoldTitle },
-    { key: "topMargin", label: t.analytics.topMarginTitle },
-    { key: "topProfit", label: t.analytics.topProfitTitle },
     { key: "stockValue", label: t.analytics.stockValueTitle },
     { key: "deadStock6mo", label: t.analytics.deadStock6moTitle },
     { key: "declining", label: t.analytics.decliningTitle },
@@ -103,8 +93,6 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
   const columns = useMemo(() => {
     switch (tab) {
       case "topSold":
-      case "topMargin":
-      case "topProfit":
         return [
           nameCol<AnalyticsData["topSold"][number]>(),
           { header: t.analytics.qty, right: true, render: (r) => formatNumber(r.qty, locale), sortValue: (r) => r.qty },
@@ -209,17 +197,13 @@ export function AnalyticsView({ data, from, to }: { data: AnalyticsData; from: s
   const baseRows: unknown[] =
     tab === "topSold"
       ? data.topSold
-      : tab === "topMargin"
-        ? data.topMargin
-        : tab === "topProfit"
-          ? data.topProfit
-          : tab === "stockValue"
-            ? data.stockValue
-            : tab === "deadStock6mo"
-              ? data.deadStock6mo
-              : tab === "declining"
-                ? data.declining
-                : data.abc;
+      : tab === "stockValue"
+        ? data.stockValue
+        : tab === "deadStock6mo"
+          ? data.deadStock6mo
+          : tab === "declining"
+            ? data.declining
+            : data.abc;
 
   const rows = useMemo(() => {
     let list = baseRows as { name: string; group?: "A" | "B" | "C" }[];
