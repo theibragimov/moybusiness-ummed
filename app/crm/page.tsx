@@ -13,14 +13,6 @@ export default async function CrmPage({
   const to = searchParams.to ?? monthEndYmd();
   const [rows, abc] = await Promise.all([getCounterparties(), getCustomerAbc(from, to)]);
   return (
-    <CrmView
-      rows={rows}
-      abc={abc}
-      from={from}
-      to={to}
-      today={todayYmd()}
-      oneMonthAgo={daysAgoYmd(30)}
-      threeMonthsAgo={daysAgoYmd(90)}
-    />
+    <CrmView rows={rows} abc={abc} from={from} to={to} today={todayYmd()} oneMonthAgo={daysAgoYmd(30)} />
   );
 }

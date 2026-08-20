@@ -292,24 +292,20 @@ function InactiveSection({
   customers,
   today,
   oneMonthAgo,
-  threeMonthsAgo,
 }: {
   customers: CounterpartyRow[];
   today: string;
   oneMonthAgo: string;
-  threeMonthsAgo: string;
 }) {
   const { t, locale } = useLanguage();
-  const [threshold, setThreshold] = useState<"1mo" | "3mo">("1mo");
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
 
-  const cutoff = threshold === "1mo" ? oneMonthAgo : threeMonthsAgo;
   const rows = useMemo(
     () =>
       customers
-        .filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < cutoff)
+        .filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < oneMonthAgo)
         .sort((a, b) => (a.lastDemandDate ?? "").localeCompare(b.lastDemandDate ?? "")),
-    [customers, cutoff]
+    [customers, oneMonthAgo]
   );
 
   return (
@@ -317,29 +313,6 @@ function InactiveSection({
       <div>
         <h2 className="text-lg font-bold text-ink-900">{t.crm.inactiveTitle}</h2>
         <p className="mt-1 text-sm text-ink-500">{t.crm.inactiveSubtitle}</p>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setThreshold("1mo")}
-          className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-            threshold === "1mo"
-              ? "bg-brand-500 text-white shadow-soft"
-              : "bg-white text-ink-500 shadow-card hover:text-ink-900"
-          }`}
-        >
-          {t.crm.inactive1mo}
-        </button>
-        <button
-          onClick={() => setThreshold("3mo")}
-          className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-            threshold === "3mo"
-              ? "bg-brand-500 text-white shadow-soft"
-              : "bg-white text-ink-500 shadow-card hover:text-ink-900"
-          }`}
-        >
-          {t.crm.inactive3mo}
-        </button>
       </div>
 
       <Card>
@@ -386,7 +359,6 @@ export function CrmView({
   to,
   today,
   oneMonthAgo,
-  threeMonthsAgo,
 }: {
   rows: CounterpartyRow[];
   abc: CustomerAbcData;
@@ -394,7 +366,6 @@ export function CrmView({
   to: string;
   today: string;
   oneMonthAgo: string;
-  threeMonthsAgo: string;
 }) {
   const { t, locale } = useLanguage();
   const [tab, setTab] = useState<Tab>("customers");
@@ -443,14 +414,7 @@ export function CrmView({
       {tab === "suppliers" && <CounterpartyTable rows={suppliers} />}
       {tab === "employees" && <CounterpartyTable rows={employees} />}
       {tab === "abc" && <AbcSection data={abc} from={from} to={to} />}
-      {tab === "inactive" && (
-        <InactiveSection
-          customers={customers}
-          today={today}
-          oneMonthAgo={oneMonthAgo}
-          threeMonthsAgo={threeMonthsAgo}
-        />
-      )}
+      {tab === "inactive" && <InactiveSection customers={customers} today={today} oneMonthAgo={oneMonthAgo} />}
     </div>
   );
 }

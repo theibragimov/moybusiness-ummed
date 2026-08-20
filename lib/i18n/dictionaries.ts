@@ -195,9 +195,7 @@ export const dictionaries = {
       customersUnit: "mijoz",
       inactiveTab: "Faolsiz mijozlar",
       inactiveTitle: "Faolsiz mijozlar",
-      inactiveSubtitle: "Ma'lum muddatdan beri xarid qilmayotgan mijozlar, balansi bilan",
-      inactive1mo: "1 oydan beri sotib olmayotgan",
-      inactive3mo: "3 oydan ortiq sotib olmayotgan",
+      inactiveSubtitle: "So'nggi otgruzkasidan 1 oydan ortiq vaqt o'tgan mijozlar, balansi bilan",
       daysSincePurchase: "Oxirgi xariddan necha kun o'tdi",
     },
     company: {
@@ -451,9 +449,7 @@ export const dictionaries = {
       customersUnit: "клиентов",
       inactiveTab: "Неактивные клиенты",
       inactiveTitle: "Неактивные клиенты",
-      inactiveSubtitle: "Клиенты, не покупавшие определённое время, с их балансом",
-      inactive1mo: "Не покупают 1 месяц",
-      inactive3mo: "Не покупают более 3 месяцев",
+      inactiveSubtitle: "Клиенты, у которых последняя отгрузка была больше месяца назад, с их балансом",
       daysSincePurchase: "Дней с последней покупки",
     },
     company: {
