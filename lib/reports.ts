@@ -528,6 +528,8 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
 
 // ---------- CRM / counterparties ----------
 
+export type CounterpartySegment = "customer" | "supplier" | "employee";
+
 export interface CounterpartyRow {
   id: string;
   name: string;
@@ -537,6 +539,47 @@ export interface CounterpartyRow {
   averageReceipt: number;
   lastDemandDate: string | null;
   balance: number;
+  segment: CounterpartySegment;
+}
+
+interface CounterpartyEntityRow {
+  id: string;
+  name: string;
+  state?: { meta: { href: string } };
+}
+
+/**
+ * Counterparties are segmented by their MoySklad "state" (a free-text pipeline
+ * status like "Поставшик" or "Сатрудник" — account-specific, typo and all).
+ * Everything that isn't tagged supplier/employee is a customer, whether it's
+ * a pharmacy, hospital, wholesaler, or medical-equipment buyer.
+ */
+function classifySegment(stateName: string | undefined): CounterpartySegment {
+  if (!stateName) return "customer";
+  const n = stateName.toLowerCase();
+  if (n.includes("постав")) return "supplier";
+  if (n.includes("сотруд") || n.includes("сатруд")) return "employee";
+  return "customer";
+}
+
+interface CounterpartyMeta {
+  name: string;
+  segment: CounterpartySegment;
+}
+
+async function getCounterpartyMeta(): Promise<Map<string, CounterpartyMeta>> {
+  const [rows, meta] = await Promise.all([
+    fetchAllRows<CounterpartyEntityRow>("entity/counterparty", {}, 5000),
+    msGet<{ states: { id: string; name: string }[] }>("entity/counterparty/metadata", {}),
+  ]);
+  const stateNames = new Map(meta.states.map((s) => [s.id, s.name]));
+  const result = new Map<string, CounterpartyMeta>();
+  for (const r of rows) {
+    const stateId = r.state?.meta.href ? idFromHref(r.state.meta.href) : undefined;
+    const stateName = stateId ? stateNames.get(stateId) : undefined;
+    result.set(r.id, { name: r.name, segment: classifySegment(stateName) });
+  }
+  return result;
 }
 
 export function getCounterparties(): Promise<CounterpartyRow[]> {
@@ -544,7 +587,10 @@ export function getCounterparties(): Promise<CounterpartyRow[]> {
 }
 
 async function getCounterpartiesImpl(): Promise<CounterpartyRow[]> {
-  const rows = await fetchAllRows<CounterpartyReportRow>("report/counterparty", {}, 2000);
+  const [rows, meta] = await Promise.all([
+    fetchAllRows<CounterpartyReportRow>("report/counterparty", {}, 2000),
+    getCounterpartyMeta(),
+  ]);
   return rows.map((r) => ({
     id: r.counterparty.id,
     name: r.counterparty.name,
@@ -554,7 +600,64 @@ async function getCounterpartiesImpl(): Promise<CounterpartyRow[]> {
     averageReceipt: r.averageReceipt,
     lastDemandDate: r.lastDemandDate,
     balance: r.balance,
+    segment: meta.get(r.counterparty.id)?.segment ?? "customer",
   }));
+}
+
+// ---------- CRM / ABC customer analysis ----------
+
+export interface CustomerAbcRow {
+  id: string;
+  name: string;
+  revenue: number;
+  share: number;
+  cumulative: number;
+  group: "A" | "B" | "C";
+}
+
+export interface CustomerAbcData {
+  from: string;
+  to: string;
+  rows: CustomerAbcRow[];
+  totalRevenue: number;
+  summary: { group: "A" | "B" | "C"; count: number; revenueShare: number }[];
+}
+
+export function getCustomerAbc(from: string, to: string): Promise<CustomerAbcData> {
+  return cached(`customer-abc:${from}:${to}`, () => getCustomerAbcImpl(from, to));
+}
+
+async function getCustomerAbcImpl(from: string, to: string): Promise<CustomerAbcData> {
+  const [demands, meta] = await Promise.all([
+    fetchAllRows<DemandRow>("entity/demand", { filter: dateRangeFilter(from, to) }, 20000),
+    getCounterpartyMeta(),
+  ]);
+
+  const revenueById = new Map<string, number>();
+  for (const d of demands) {
+    const href = d.agent?.meta.href;
+    if (!href) continue;
+    const id = idFromHref(href);
+    if (meta.get(id)?.segment === "supplier" || meta.get(id)?.segment === "employee") continue;
+    revenueById.set(id, (revenueById.get(id) ?? 0) + d.sum);
+  }
+
+  const totalRevenue = [...revenueById.values()].reduce((s, v) => s + v, 0);
+  const sorted = [...revenueById.entries()].sort((a, b) => b[1] - a[1]);
+  let cumulative = 0;
+  const rows: CustomerAbcRow[] = sorted.map(([id, revenue]) => {
+    const share = totalRevenue > 0 ? revenue / totalRevenue : 0;
+    cumulative += share;
+    const group: "A" | "B" | "C" = cumulative <= 0.8 ? "A" : cumulative <= 0.95 ? "B" : "C";
+    return { id, name: meta.get(id)?.name ?? id, revenue, share, cumulative, group };
+  });
+
+  const summary = (["A", "B", "C"] as const).map((group) => {
+    const items = rows.filter((r) => r.group === group);
+    return { group, count: items.length, revenueShare: items.reduce((s, r) => s + r.share, 0) };
+  });
+
+  return { from, to, rows, totalRevenue, summary };
 }
 
 // ---------- company debts ----------
@@ -830,12 +933,8 @@ export interface CompanyHealth {
   averageCheck: number;
   grossProfit: number;
   grossMargin: number;
-  cogs: number;
-  opex: number;
   netProfit: number;
   netMargin: number;
-  netProfitBudgetAvg: number;
-  netProfitVsBudget: number;
   stockValue: number;
   deadStockCount: number;
   deadStockValue: number;
@@ -894,8 +993,17 @@ async function getCashBreakdown(): Promise<{ bankBalance: number; kassaBalance: 
   };
 }
 
-/** Average MTD-equivalent Net Profit (gross profit − OPEX) over the last 6 real calendar months, used as a rough budget line. */
-async function getNetProfitBudgetAvg(): Promise<number> {
+/**
+ * Average MTD-equivalent Net Profit (gross profit − OPEX) over the last 6 real
+ * calendar months, used as a rough budget line. Doesn't depend on the caller's
+ * selected from/to, so it's cached under its own key (by current month) —
+ * otherwise every distinct Net Profit period would redundantly recompute it.
+ */
+function getNetProfitBudgetAvg(): Promise<number> {
+  return cached(`net-profit-budget:${lastMonths(1)[0].label}`, getNetProfitBudgetAvgImpl);
+}
+
+async function getNetProfitBudgetAvgImpl(): Promise<number> {
   const months = lastMonths(6);
   const [profitByMonth, opexRows, expenseItemNames] = await Promise.all([
     Promise.all(
@@ -926,11 +1034,70 @@ async function getNetProfitBudgetAvg(): Promise<number> {
   return netProfits.reduce((s, v) => s + v, 0) / months.length;
 }
 
+export interface NetProfitData {
+  from: string;
+  to: string;
+  revenue: number;
+  cogs: number;
+  opex: number;
+  grossProfit: number;
+  grossMargin: number;
+  netProfit: number;
+  netMargin: number;
+  budgetAvg: number;
+  budgetUsage: number;
+}
+
+export function getNetProfitData(from: string, to: string): Promise<NetProfitData> {
+  return cached(`net-profit:${from}:${to}`, () => getNetProfitDataImpl(from, to));
+}
+
+async function getNetProfitDataImpl(from: string, to: string): Promise<NetProfitData> {
+  const [profitRows, opexRows, expenseItemNames, budgetAvg] = await Promise.all([
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(from),
+      momentTo: momentTo(to),
+    }),
+    listCashOutflows(from, to),
+    getExpenseItemNames(),
+    getNetProfitBudgetAvg(),
+  ]);
+
+  const revenue = profitRows.reduce((s, r) => s + r.sellSum, 0);
+  const cogs = profitRows.reduce((s, r) => s + r.sellCostSum, 0);
+  const grossProfit = profitRows.reduce((s, r) => s + r.profit, 0);
+  const grossMargin = revenue > 0 ? grossProfit / revenue : 0;
+
+  let opex = 0;
+  for (const r of opexRows) {
+    const cat = categoryName(r, expenseItemNames);
+    if (isGoodsPurchaseCategory(cat)) continue;
+    opex += r.sum;
+  }
+
+  const netProfit = grossProfit - opex;
+  const netMargin = revenue > 0 ? netProfit / revenue : 0;
+
+  return {
+    from,
+    to,
+    revenue,
+    cogs,
+    opex,
+    grossProfit,
+    grossMargin,
+    netProfit,
+    netMargin,
+    budgetAvg,
+    budgetUsage: budgetAvg !== 0 ? netProfit / budgetAvg : 0,
+  };
+}
+
 async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Promise<CompanyHealth> {
   const threeMonthsAgo = lastMonths(3)[0].start;
   const prevMonth = lastMonths(2)[0];
 
-  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands, cashBreakdown, netProfitBudgetAvg] =
+  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands, cashBreakdown] =
     await Promise.all([
       getDashboardData(todayYmd, monthStartYmd),
       getDebtsData(),
@@ -947,7 +1114,6 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
         filter: dateRangeFilter(prevMonth.start, prevMonth.end),
       }),
       getCashBreakdown(),
-      getNetProfitBudgetAvg(),
     ]);
 
   const revenue = dashboard.monthRevenueSum;
@@ -1032,12 +1198,8 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
     averageCheck,
     grossProfit: dashboard.grossProfit,
     grossMargin: dashboard.grossMargin,
-    cogs: dashboard.monthCostSum,
-    opex: dashboard.operatingExpensesSum,
     netProfit: dashboard.netProfit,
     netMargin: dashboard.netMargin,
-    netProfitBudgetAvg,
-    netProfitVsBudget: netProfitBudgetAvg !== 0 ? dashboard.netProfit / netProfitBudgetAvg : 0,
     stockValue,
     deadStockCount,
     deadStockValue,

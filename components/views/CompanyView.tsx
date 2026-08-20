@@ -23,7 +23,8 @@ import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import type { DebtsData, CompanyHealth } from "@/lib/reports";
+import { PeriodPicker } from "@/components/PeriodPicker";
+import type { DebtsData, CompanyHealth, NetProfitData } from "@/lib/reports";
 
 function CashSection({ health, totalDebtByUs }: { health: CompanyHealth; totalDebtByUs: number }) {
   const { t, locale } = useLanguage();
@@ -60,56 +61,56 @@ function CashSection({ health, totalDebtByUs }: { health: CompanyHealth; totalDe
   );
 }
 
-function NetProfitSection({ health }: { health: CompanyHealth }) {
+function NetProfitSection({ data }: { data: NetProfitData }) {
   const { t, locale } = useLanguage();
   const moneyRaw = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
 
-  // Derived from the same figures netProfit itself is built from, so the strip
-  // always ties out exactly instead of drifting from a separately-sourced revenue number.
-  const revenue = health.netProfit + health.cogs + health.opex;
-
   return (
     <div className="space-y-3">
-      <div>
-        <h2 className="text-lg font-bold text-ink-900">{t.company.netProfitSectionTitle}</h2>
-        <p className="mt-1 text-sm text-ink-500">{t.company.netProfitFormula}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-ink-900">{t.company.netProfitSectionTitle}</h2>
+          <p className="mt-1 text-sm text-ink-500">{t.company.netProfitFormula}</p>
+        </div>
+        <PeriodPicker from={data.from} to={data.to} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-3xl bg-white p-5 text-sm shadow-card">
-        <span className="font-semibold text-ink-900">{moneyRaw(revenue)}</span>
+        <span className="font-semibold text-ink-900">{moneyRaw(data.revenue)}</span>
         <span className="text-ink-400">({t.company.netProfitFormulaRevenue})</span>
         <span className="text-ink-300">−</span>
-        <span className="font-semibold text-ink-900">{moneyRaw(health.cogs)}</span>
+        <span className="font-semibold text-ink-900">{moneyRaw(data.cogs)}</span>
         <span className="text-ink-400">({t.company.netProfitFormulaCogs})</span>
         <span className="text-ink-300">−</span>
-        <span className="font-semibold text-ink-900">{moneyRaw(health.opex)}</span>
+        <span className="font-semibold text-ink-900">{moneyRaw(data.opex)}</span>
         <span className="text-ink-400">({t.company.netProfitFormulaOpex})</span>
         <span className="text-ink-300">=</span>
-        <span className={`font-bold ${health.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-          {moneyRaw(health.netProfit)}
+        <span className={`font-bold ${data.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+          {moneyRaw(data.netProfit)}
         </span>
         <span className="text-ink-400">({t.company.netProfitFormulaResult})</span>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
-          icon={health.netProfit >= 0 ? TrendingUp : TrendingDown}
+          icon={data.netProfit >= 0 ? TrendingUp : TrendingDown}
           label={t.company.mtdNetProfit}
-          value={moneyRaw(health.netProfit)}
-          accent={health.netProfit >= 0 ? "emerald" : "rose"}
+          value={moneyRaw(data.netProfit)}
+          hint={`${data.from} — ${data.to}`}
+          accent={data.netProfit >= 0 ? "emerald" : "rose"}
         />
         <StatCard
           icon={Percent}
           label={t.company.netMarginPercent}
-          value={formatPercent(health.netMargin)}
-          accent={health.netMargin >= 0 ? "emerald" : "rose"}
+          value={formatPercent(data.netMargin)}
+          accent={data.netMargin >= 0 ? "emerald" : "rose"}
         />
         <StatCard
           icon={Target}
           label={t.company.budgetVsActual}
-          value={formatPercent(health.netProfitVsBudget)}
-          hint={`${t.company.budgetVsActualHint}: ${moneyRaw(health.netProfitBudgetAvg)}`}
-          accent={health.netProfit >= health.netProfitBudgetAvg ? "emerald" : "amber"}
+          value={formatPercent(data.budgetUsage)}
+          hint={`${t.company.budgetVsActualHint}: ${moneyRaw(data.budgetAvg)}`}
+          accent={data.netProfit >= data.budgetAvg ? "emerald" : "amber"}
         />
       </div>
     </div>
@@ -277,9 +278,11 @@ function HealthSection({
 export function CompanyView({
   data,
   health,
+  netProfit,
 }: {
   data: DebtsData;
   health: CompanyHealth;
+  netProfit: NetProfitData;
 }) {
   const { t } = useLanguage();
 
@@ -292,7 +295,7 @@ export function CompanyView({
 
       <CashSection health={health} totalDebtByUs={data.totalDebtByUs} />
 
-      <NetProfitSection health={health} />
+      <NetProfitSection data={netProfit} />
 
       <HealthSection health={health} totalDebtToUs={data.totalDebtToUs} totalDebtByUs={data.totalDebtByUs} />
     </div>

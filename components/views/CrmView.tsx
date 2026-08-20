@@ -1,14 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, ChevronUp, ChevronDown, Users, Truck, IdCard } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
-import type { CounterpartyRow } from "@/lib/reports";
+import { StatCard } from "@/components/StatCard";
+import { PeriodPicker } from "@/components/PeriodPicker";
+import type { CounterpartyRow, CounterpartySegment, CustomerAbcData } from "@/lib/reports";
 
+type Tab = "customers" | "suppliers" | "employees" | "abc";
 type SortKey = "name" | "demandsCount" | "demandsSum" | "averageReceipt" | "lastDemandDate" | "balance";
 type SortDir = "asc" | "desc";
+type AbcFilter = "all" | "A" | "B" | "C";
 
 const DEFAULT_DIR: Record<SortKey, SortDir> = {
   name: "asc",
@@ -17,6 +21,18 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   averageReceipt: "desc",
   lastDemandDate: "desc",
   balance: "desc",
+};
+
+const GROUP_BADGE: Record<"A" | "B" | "C", string> = {
+  A: "bg-emerald-500 text-white",
+  B: "bg-amber-500 text-white",
+  C: "bg-rose-500 text-white",
+};
+
+const GROUP_ROW: Record<"A" | "B" | "C", string> = {
+  A: "bg-emerald-50 hover:bg-emerald-100",
+  B: "bg-amber-50 hover:bg-amber-100",
+  C: "bg-rose-50 hover:bg-rose-100",
 };
 
 function SortHeader({
@@ -55,7 +71,7 @@ function SortHeader({
   );
 }
 
-export function CrmView({ rows }: { rows: CounterpartyRow[] }) {
+function CounterpartyTable({ rows }: { rows: CounterpartyRow[] }) {
   const { t, locale } = useLanguage();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("demandsSum");
@@ -87,13 +103,8 @@ export function CrmView({ rows }: { rows: CounterpartyRow[] }) {
   }, [rows, query, sortKey, sortDir]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-ink-900">{t.crm.title}</h1>
-        <p className="mt-1 text-sm text-ink-500">{t.crm.subtitle}</p>
-      </div>
-
-      <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 shadow-card">
+    <>
+      <div className="mb-4 flex items-center gap-2 rounded-full bg-white px-4 py-2.5 shadow-card">
         <Search size={16} className="text-ink-400" />
         <input
           value={query}
@@ -174,6 +185,160 @@ export function CrmView({ rows }: { rows: CounterpartyRow[] }) {
           {filtered.length === 0 && <p className="py-10 text-center text-sm text-ink-400">{t.common.noData}</p>}
         </div>
       </Card>
+    </>
+  );
+}
+
+function AbcSection({ data, from, to }: { data: CustomerAbcData; from: string; to: string }) {
+  const { t, locale } = useLanguage();
+  const [abcFilter, setAbcFilter] = useState<AbcFilter>("all");
+  const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  const rows = abcFilter === "all" ? data.rows : data.rows.filter((r) => r.group === abcFilter);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-ink-900">{t.crm.abcTitle}</h2>
+          <p className="mt-1 text-sm text-ink-500">{t.crm.abcSubtitle}</p>
+        </div>
+        <PeriodPicker from={from} to={to} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-3xl bg-white p-5 shadow-card sm:col-span-3">
+          <p className="text-xs text-ink-400">{t.crm.abcTotalRevenue}</p>
+          <p className="mt-1 text-2xl font-bold text-ink-900">{money(data.totalRevenue)}</p>
+        </div>
+        {data.summary.map((g) => (
+          <button
+            key={g.group}
+            onClick={() => setAbcFilter(abcFilter === g.group ? "all" : g.group)}
+            className={`rounded-3xl bg-white p-5 text-left shadow-card ring-2 transition-colors ${
+              abcFilter === g.group ? "ring-brand-400" : "ring-transparent"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={`flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-bold ${GROUP_BADGE[g.group]}`}
+              >
+                {g.group}
+              </span>
+              <span className="text-xs text-ink-400">
+                {formatNumber(g.count, locale)} {t.crm.customersUnit}
+              </span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-ink-900">{formatPercent(g.revenueShare)}</p>
+            <p className="text-xs text-ink-400">{t.analytics.share}</p>
+          </button>
+        ))}
+        <p className="sm:col-span-3 text-xs text-ink-400">{t.crm.abcHint}</p>
+      </div>
+
+      {abcFilter !== "all" && (
+        <button
+          onClick={() => setAbcFilter("all")}
+          className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-ink-500 shadow-card hover:text-ink-900"
+        >
+          {t.analytics.filterAll}
+        </button>
+      )}
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
+                <th className="pb-2 font-medium">#</th>
+                <th className="pb-2 font-medium">{t.crm.name}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.revenue}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.share}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.cumulative}</th>
+                <th className="pb-2 text-right font-medium">{t.crm.group}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface">
+              {rows.map((r, i) => (
+                <tr key={r.id} className={GROUP_ROW[r.group]}>
+                  <td className="py-2.5 pl-3 text-ink-400">{i + 1}</td>
+                  <td className="py-2.5 max-w-[280px] truncate font-medium text-ink-900">{r.name}</td>
+                  <td className="py-2.5 text-right font-semibold text-ink-900">{money(r.revenue)}</td>
+                  <td className="py-2.5 text-right text-ink-700">{formatPercent(r.share)}</td>
+                  <td className="py-2.5 text-right text-ink-700">{formatPercent(r.cumulative)}</td>
+                  <td className="py-2.5 pr-3 text-right">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${GROUP_BADGE[r.group]}`}>
+                      {r.group}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <p className="py-10 text-center text-sm text-ink-400">{t.crm.noCustomersInPeriod}</p>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+export function CrmView({
+  rows,
+  abc,
+  from,
+  to,
+}: {
+  rows: CounterpartyRow[];
+  abc: CustomerAbcData;
+  from: string;
+  to: string;
+}) {
+  const { t, locale } = useLanguage();
+  const [tab, setTab] = useState<Tab>("customers");
+
+  const bySegment = (segment: CounterpartySegment) => rows.filter((r) => r.segment === segment);
+  const customers = useMemo(() => bySegment("customer"), [rows]);
+  const suppliers = useMemo(() => bySegment("supplier"), [rows]);
+  const employees = useMemo(() => bySegment("employee"), [rows]);
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "customers", label: t.crm.customersTab },
+    { key: "suppliers", label: t.crm.suppliersTab },
+    { key: "employees", label: t.crm.employeesTab },
+    { key: "abc", label: t.crm.abcTab },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900">{t.crm.title}</h1>
+        <p className="mt-1 text-sm text-ink-500">{t.crm.subtitle}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard icon={Users} label={t.crm.totalCustomers} value={formatNumber(customers.length, locale)} accent="brand" />
+        <StatCard icon={Truck} label={t.crm.totalSuppliers} value={formatNumber(suppliers.length, locale)} accent="amber" />
+        <StatCard icon={IdCard} label={t.crm.totalEmployees} value={formatNumber(employees.length, locale)} accent="emerald" />
+      </div>
+
+      <div className="flex flex-wrap gap-2 rounded-full bg-white p-1.5 shadow-card">
+        {tabs.map((tb) => (
+          <button
+            key={tb.key}
+            onClick={() => setTab(tb.key)}
+            className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
+            }`}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "customers" && <CounterpartyTable rows={customers} />}
+      {tab === "suppliers" && <CounterpartyTable rows={suppliers} />}
+      {tab === "employees" && <CounterpartyTable rows={employees} />}
+      {tab === "abc" && <AbcSection data={abc} from={from} to={to} />}
     </div>
   );
 }
