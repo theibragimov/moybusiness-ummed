@@ -20,6 +20,9 @@ import {
   CircleCheck,
   CircleAlert,
   CircleX,
+  Landmark,
+  Banknote,
+  Sparkles,
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent, fromMs } from "@/lib/format";
@@ -255,6 +258,41 @@ function DebtTable({
   );
 }
 
+function CashSection({ health, totalDebtByUs }: { health: CompanyHealth; totalDebtByUs: number }) {
+  const { t, locale } = useLanguage();
+  const moneyRaw = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  const availableCash = health.bankBalance + health.kassaBalance;
+  const freeCash = availableCash - totalDebtByUs;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg font-bold text-ink-900">{t.company.cashSectionTitle}</h2>
+        <p className="mt-1 text-sm text-ink-500">{t.company.cashSectionSubtitle}</p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={Landmark} label={t.company.bankMoney} value={moneyRaw(health.bankBalance)} accent="brand" />
+        <StatCard icon={Banknote} label={t.company.kassaMoney} value={moneyRaw(health.kassaBalance)} accent="brand" />
+        <StatCard
+          icon={AlertTriangle}
+          label={t.company.upcomingObligations}
+          value={moneyRaw(totalDebtByUs)}
+          hint={t.company.upcomingObligationsHint}
+          accent="amber"
+        />
+        <StatCard
+          icon={Sparkles}
+          label={t.company.freeCash}
+          value={moneyRaw(freeCash)}
+          hint={t.company.freeCashHint}
+          accent={freeCash >= 0 ? "emerald" : "rose"}
+        />
+      </div>
+    </div>
+  );
+}
+
 const VERDICT_STYLE = {
   good: { bg: "bg-emerald-50", text: "text-emerald-700", icon: CircleCheck },
   average: { bg: "bg-amber-50", text: "text-amber-700", icon: CircleAlert },
@@ -465,6 +503,8 @@ export function CompanyView({
         <h1 className="text-2xl font-bold tracking-tight text-ink-900">{t.company.title}</h1>
         <p className="mt-1 text-sm text-ink-500">{t.company.subtitle}</p>
       </div>
+
+      <CashSection health={health} totalDebtByUs={totalDebtByUs} />
 
       <HealthSection health={health} totalDebtToUs={totalDebtToUs} totalDebtByUs={totalDebtByUs} money={money} />
 

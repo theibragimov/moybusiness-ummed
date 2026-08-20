@@ -821,6 +821,8 @@ type HealthFactor = "good" | "ok" | "bad";
 
 export interface CompanyHealth {
   cashPosition: number;
+  bankBalance: number;
+  kassaBalance: number;
   debitorQarz: number;
   kreditorQarz: number;
   revenue: number;
@@ -865,26 +867,51 @@ export function getCompanyHealth(todayYmd: string, monthStartYmd: string): Promi
   );
 }
 
+interface MoneySumRow {
+  sum: number;
+}
+
+/**
+ * Bank vs. cash-on-hand split, from all-time running totals — MoySklad's own
+ * balance report only gives one combined figure. cashin/cashout are physical
+ * cash (kassa); paymentin/paymentout are bank transfers.
+ */
+async function getCashBreakdown(): Promise<{ bankBalance: number; kassaBalance: number }> {
+  const [cashin, cashout, paymentin, paymentout] = await Promise.all([
+    fetchAllRows<MoneySumRow>("entity/cashin", {}, 20000),
+    fetchAllRows<MoneySumRow>("entity/cashout", {}, 20000),
+    fetchAllRows<MoneySumRow>("entity/paymentin", {}, 20000),
+    fetchAllRows<MoneySumRow>("entity/paymentout", {}, 20000),
+  ]);
+  const sum = (rows: MoneySumRow[]) => rows.reduce((s, r) => s + r.sum, 0);
+  return {
+    kassaBalance: sum(cashin) - sum(cashout),
+    bankBalance: sum(paymentin) - sum(paymentout),
+  };
+}
+
 async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Promise<CompanyHealth> {
   const threeMonthsAgo = lastMonths(3)[0].start;
   const prevMonth = lastMonths(2)[0];
 
-  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands] = await Promise.all([
-    getDashboardData(todayYmd, monthStartYmd),
-    getDebtsData(),
-    getStockSnapshot(),
-    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-      momentFrom: momentFrom(monthStartYmd),
-      momentTo: momentTo(todayYmd),
-    }),
-    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-      momentFrom: momentFrom(threeMonthsAgo),
-      momentTo: momentTo(todayYmd),
-    }),
-    fetchAllRows<DemandRow>("entity/demand", {
-      filter: dateRangeFilter(prevMonth.start, prevMonth.end),
-    }),
-  ]);
+  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands, cashBreakdown] =
+    await Promise.all([
+      getDashboardData(todayYmd, monthStartYmd),
+      getDebtsData(),
+      getStockSnapshot(),
+      fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+        momentFrom: momentFrom(monthStartYmd),
+        momentTo: momentTo(todayYmd),
+      }),
+      fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+        momentFrom: momentFrom(threeMonthsAgo),
+        momentTo: momentTo(todayYmd),
+      }),
+      fetchAllRows<DemandRow>("entity/demand", {
+        filter: dateRangeFilter(prevMonth.start, prevMonth.end),
+      }),
+      getCashBreakdown(),
+    ]);
 
   const revenue = dashboard.monthRevenueSum;
   const daysElapsed = Number(todayYmd.slice(8, 10));
@@ -959,6 +986,8 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
 
   return {
     cashPosition: dashboard.cashBalance,
+    bankBalance: cashBreakdown.bankBalance,
+    kassaBalance: cashBreakdown.kassaBalance,
     debitorQarz: debts.totalDebtToUs,
     kreditorQarz: debts.totalDebtByUs,
     revenue,
