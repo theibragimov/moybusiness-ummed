@@ -288,6 +288,14 @@ function daysBetween(a: string, b: string): number {
   return Math.round((d2 - d1) / 86400000);
 }
 
+type InactiveSortKey = "name" | "lastDemandDate" | "balance";
+
+const INACTIVE_DEFAULT_DIR: Record<InactiveSortKey, SortDir> = {
+  name: "asc",
+  lastDemandDate: "asc",
+  balance: "desc",
+};
+
 function InactiveSection({
   customers,
   today,
@@ -299,14 +307,27 @@ function InactiveSection({
 }) {
   const { t, locale } = useLanguage();
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+  const [sortKey, setSortKey] = useState<InactiveSortKey>("lastDemandDate");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const rows = useMemo(
-    () =>
-      customers
-        .filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < oneMonthAgo)
-        .sort((a, b) => (a.lastDemandDate ?? "").localeCompare(b.lastDemandDate ?? "")),
-    [customers, oneMonthAgo]
-  );
+  const toggleSort = (key: InactiveSortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(INACTIVE_DEFAULT_DIR[key]);
+    }
+  };
+
+  const rows = useMemo(() => {
+    const inactive = customers.filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < oneMonthAgo);
+    const dirMul = sortDir === "asc" ? 1 : -1;
+    return inactive.sort((a, b) => {
+      if (sortKey === "name") return a.name.localeCompare(b.name) * dirMul;
+      if (sortKey === "balance") return (a.balance - b.balance) * dirMul;
+      return (a.lastDemandDate ?? "").localeCompare(b.lastDemandDate ?? "") * dirMul;
+    });
+  }, [customers, oneMonthAgo, sortKey, sortDir]);
 
   return (
     <div className="space-y-4">
@@ -319,11 +340,27 @@ function InactiveSection({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
-                <th className="pb-2 font-medium">{t.crm.name}</th>
-                <th className="pb-2 font-medium">{t.crm.lastDemand}</th>
+              <tr className="text-xs uppercase tracking-wide text-ink-400">
+                <SortHeader
+                  label={t.crm.name}
+                  active={sortKey === "name"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("name")}
+                />
+                <SortHeader
+                  label={t.crm.lastDemand}
+                  active={sortKey === "lastDemandDate"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("lastDemandDate")}
+                />
                 <th className="pb-2 text-right font-medium">{t.crm.daysSincePurchase}</th>
-                <th className="pb-2 text-right font-medium">{t.crm.balance}</th>
+                <SortHeader
+                  label={t.crm.balance}
+                  active={sortKey === "balance"}
+                  dir={sortDir}
+                  align="right"
+                  onClick={() => toggleSort("balance")}
+                />
               </tr>
             </thead>
             <tbody className="divide-y divide-surface">
