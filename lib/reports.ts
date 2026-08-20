@@ -830,8 +830,12 @@ export interface CompanyHealth {
   averageCheck: number;
   grossProfit: number;
   grossMargin: number;
+  cogs: number;
+  opex: number;
   netProfit: number;
   netMargin: number;
+  netProfitBudgetAvg: number;
+  netProfitVsBudget: number;
   stockValue: number;
   deadStockCount: number;
   deadStockValue: number;
@@ -890,11 +894,43 @@ async function getCashBreakdown(): Promise<{ bankBalance: number; kassaBalance: 
   };
 }
 
+/** Average MTD-equivalent Net Profit (gross profit − OPEX) over the last 6 real calendar months, used as a rough budget line. */
+async function getNetProfitBudgetAvg(): Promise<number> {
+  const months = lastMonths(6);
+  const [profitByMonth, opexRows, expenseItemNames] = await Promise.all([
+    Promise.all(
+      months.map((m) =>
+        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+          momentFrom: momentFrom(m.start),
+          momentTo: momentTo(m.end),
+        }).catch(() => [] as ProfitByProductRow[])
+      )
+    ),
+    listCashOutflows(months[0].start, months[months.length - 1].end),
+    getExpenseItemNames(),
+  ]);
+
+  const opexByMonth = new Map<string, number>();
+  for (const r of opexRows) {
+    const cat = categoryName(r, expenseItemNames);
+    if (isGoodsPurchaseCategory(cat)) continue;
+    const month = dayOf(r.moment).slice(0, 7);
+    opexByMonth.set(month, (opexByMonth.get(month) ?? 0) + r.sum);
+  }
+
+  const netProfits = months.map((m, i) => {
+    const grossProfit = profitByMonth[i].reduce((s, r) => s + r.profit, 0);
+    const opex = opexByMonth.get(m.label) ?? 0;
+    return grossProfit - opex;
+  });
+  return netProfits.reduce((s, v) => s + v, 0) / months.length;
+}
+
 async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Promise<CompanyHealth> {
   const threeMonthsAgo = lastMonths(3)[0].start;
   const prevMonth = lastMonths(2)[0];
 
-  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands, cashBreakdown] =
+  const [dashboard, debts, stockRows, profitRowsMonth, profitRows3mo, prevMonthDemands, cashBreakdown, netProfitBudgetAvg] =
     await Promise.all([
       getDashboardData(todayYmd, monthStartYmd),
       getDebtsData(),
@@ -911,6 +947,7 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
         filter: dateRangeFilter(prevMonth.start, prevMonth.end),
       }),
       getCashBreakdown(),
+      getNetProfitBudgetAvg(),
     ]);
 
   const revenue = dashboard.monthRevenueSum;
@@ -995,8 +1032,12 @@ async function getCompanyHealthImpl(todayYmd: string, monthStartYmd: string): Pr
     averageCheck,
     grossProfit: dashboard.grossProfit,
     grossMargin: dashboard.grossMargin,
+    cogs: dashboard.monthCostSum,
+    opex: dashboard.operatingExpensesSum,
     netProfit: dashboard.netProfit,
     netMargin: dashboard.netMargin,
+    netProfitBudgetAvg,
+    netProfitVsBudget: netProfitBudgetAvg !== 0 ? dashboard.netProfit / netProfitBudgetAvg : 0,
     stockValue,
     deadStockCount,
     deadStockValue,

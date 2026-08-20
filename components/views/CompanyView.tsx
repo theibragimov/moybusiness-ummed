@@ -23,6 +23,8 @@ import {
   Landmark,
   Banknote,
   Sparkles,
+  Percent,
+  Target,
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent, fromMs } from "@/lib/format";
@@ -293,6 +295,62 @@ function CashSection({ health, totalDebtByUs }: { health: CompanyHealth; totalDe
   );
 }
 
+function NetProfitSection({ health }: { health: CompanyHealth }) {
+  const { t, locale } = useLanguage();
+  const moneyRaw = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  // Derived from the same figures netProfit itself is built from, so the strip
+  // always ties out exactly instead of drifting from a separately-sourced revenue number.
+  const revenue = health.netProfit + health.cogs + health.opex;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg font-bold text-ink-900">{t.company.netProfitSectionTitle}</h2>
+        <p className="mt-1 text-sm text-ink-500">{t.company.netProfitFormula}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-3xl bg-white p-5 text-sm shadow-card">
+        <span className="font-semibold text-ink-900">{moneyRaw(revenue)}</span>
+        <span className="text-ink-400">({t.company.netProfitFormulaRevenue})</span>
+        <span className="text-ink-300">−</span>
+        <span className="font-semibold text-ink-900">{moneyRaw(health.cogs)}</span>
+        <span className="text-ink-400">({t.company.netProfitFormulaCogs})</span>
+        <span className="text-ink-300">−</span>
+        <span className="font-semibold text-ink-900">{moneyRaw(health.opex)}</span>
+        <span className="text-ink-400">({t.company.netProfitFormulaOpex})</span>
+        <span className="text-ink-300">=</span>
+        <span className={`font-bold ${health.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+          {moneyRaw(health.netProfit)}
+        </span>
+        <span className="text-ink-400">({t.company.netProfitFormulaResult})</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard
+          icon={health.netProfit >= 0 ? TrendingUp : TrendingDown}
+          label={t.company.mtdNetProfit}
+          value={moneyRaw(health.netProfit)}
+          accent={health.netProfit >= 0 ? "emerald" : "rose"}
+        />
+        <StatCard
+          icon={Percent}
+          label={t.company.netMarginPercent}
+          value={formatPercent(health.netMargin)}
+          accent={health.netMargin >= 0 ? "emerald" : "rose"}
+        />
+        <StatCard
+          icon={Target}
+          label={t.company.budgetVsActual}
+          value={formatPercent(health.netProfitVsBudget)}
+          hint={`${t.company.budgetVsActualHint}: ${moneyRaw(health.netProfitBudgetAvg)}`}
+          accent={health.netProfit >= health.netProfitBudgetAvg ? "emerald" : "amber"}
+        />
+      </div>
+    </div>
+  );
+}
+
 const VERDICT_STYLE = {
   good: { bg: "bg-emerald-50", text: "text-emerald-700", icon: CircleCheck },
   average: { bg: "bg-amber-50", text: "text-amber-700", icon: CircleAlert },
@@ -505,6 +563,8 @@ export function CompanyView({
       </div>
 
       <CashSection health={health} totalDebtByUs={totalDebtByUs} />
+
+      <NetProfitSection health={health} />
 
       <HealthSection health={health} totalDebtToUs={totalDebtToUs} totalDebtByUs={totalDebtByUs} money={money} />
 
