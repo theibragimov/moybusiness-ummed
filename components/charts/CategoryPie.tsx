@@ -13,14 +13,14 @@ export function CategoryPie({ data }: { data: { category: string; sum: number }[
 
   return (
     <div className="flex items-center gap-4">
-      <ResponsiveContainer width={140} height={140}>
+      <ResponsiveContainer width={96} height={96}>
         <PieChart>
           <Pie
             data={top}
             dataKey="sum"
             nameKey="category"
-            innerRadius={40}
-            outerRadius={64}
+            innerRadius={28}
+            outerRadius={44}
             paddingAngle={2}
             strokeWidth={0}
           >

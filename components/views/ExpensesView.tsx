@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wallet2 } from "lucide-react";
+import { Wallet2, Percent, Target } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { PeriodPicker } from "@/components/PeriodPicker";
@@ -47,14 +47,29 @@ export function ExpensesView({ data, from, to }: { data: ExpensesData; from: str
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard icon={Wallet2} label={t.expenses.totalTitle} value={money(data.total)} accent="rose" />
-        <Card title={t.expenses.byCategory} className="sm:col-span-2">
-          {data.byCategory.length > 0 ? (
-            <CategoryPie data={data.byCategory} />
-          ) : (
-            <p className="py-6 text-center text-sm text-ink-400">{t.common.noData}</p>
-          )}
-        </Card>
+        <StatCard
+          icon={Percent}
+          label={t.expenses.opexToRevenueTitle}
+          value={formatPercent(data.opexToRevenue)}
+          hint={`${t.expenses.opexToRevenueHint}: ${money(data.revenue)}`}
+          accent="amber"
+        />
+        <StatCard
+          icon={Target}
+          label={t.expenses.budgetTitle}
+          value={formatPercent(data.budgetUsage)}
+          hint={`${t.expenses.budgetHint}: ${money(data.budgetAvg)}`}
+          accent={data.budgetUsage > 1 ? "rose" : "emerald"}
+        />
       </div>
+
+      <Card title={t.expenses.byCategory}>
+        {data.byCategory.length > 0 ? (
+          <CategoryPie data={data.byCategory} />
+        ) : (
+          <p className="py-6 text-center text-sm text-ink-400">{t.common.noData}</p>
+        )}
+      </Card>
 
       <Card title={t.expenses.compareTitle}>
         <p className="mb-3 text-xs text-ink-400">{t.expenses.compareHint}</p>

@@ -432,6 +432,10 @@ async function getAnalyticsDataImpl(from: string, to: string): Promise<Analytics
 
 export interface ExpensesData {
   total: number;
+  revenue: number;
+  opexToRevenue: number;
+  budgetAvg: number;
+  budgetUsage: number;
   byCategory: { category: string; sum: number }[];
   byDay: { day: string; sum: number }[];
   categoryDaily: { category: string; days: { day: string; sum: number }[] }[];
@@ -442,8 +446,32 @@ export function getExpensesData(from: string, to: string): Promise<ExpensesData>
   return cached(`expenses:${from}:${to}`, () => getExpensesDataImpl(from, to));
 }
 
+/** Average monthly OPEX (goods purchases excluded) over the last 6 real calendar months, used as a rough budget line. */
+async function getOpexBudgetAvg(): Promise<number> {
+  const months = lastMonths(6);
+  const [rows, expenseItemNames] = await Promise.all([
+    listCashOutflows(months[0].start, months[months.length - 1].end),
+    getExpenseItemNames(),
+  ]);
+  const byMonth = new Map<string, number>();
+  for (const r of rows) {
+    const cat = categoryName(r, expenseItemNames);
+    if (isGoodsPurchaseCategory(cat)) continue;
+    const month = dayOf(r.moment).slice(0, 7);
+    byMonth.set(month, (byMonth.get(month) ?? 0) + r.sum);
+  }
+  const sum = [...byMonth.values()].reduce((s, v) => s + v, 0);
+  return sum / months.length;
+}
+
 async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesData> {
-  const [rows, expenseItemNames] = await Promise.all([listCashOutflows(from, to), getExpenseItemNames()]);
+  const [rows, expenseItemNames, periodDemands, budgetAvg] = await Promise.all([
+    listCashOutflows(from, to),
+    getExpenseItemNames(),
+    listDemands(from, to),
+    getOpexBudgetAvg(),
+  ]);
+  const revenue = periodDemands.reduce((s, d) => s + d.sum, 0);
 
   const byCategoryMap = new Map<string, number>();
   const byDayMap = new Map<string, number>();
@@ -485,7 +513,17 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
     description: r.description ?? "",
   }));
 
-  return { total, byCategory, byDay, categoryDaily, recent };
+  return {
+    total,
+    revenue,
+    opexToRevenue: revenue > 0 ? total / revenue : 0,
+    budgetAvg,
+    budgetUsage: budgetAvg > 0 ? total / budgetAvg : 0,
+    byCategory,
+    byDay,
+    categoryDaily,
+    recent,
+  };
 }
 
 // ---------- CRM / counterparties ----------
