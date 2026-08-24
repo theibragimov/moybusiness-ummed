@@ -109,9 +109,11 @@ async function listDemands(from: string, to: string): Promise<DemandRow[]> {
 export interface MonthlyPLRow {
   label: string; // "YYYY-MM"
   revenue: number;
+  cogs: number; // cost of goods sold (sellCostSum) — revenue - cogs = grossProfit
   grossProfit: number;
   netProfit: number;
   expenses: number; // operating expenses (excludes goods purchases, already in COGS)
+  expensesByCategory: { category: string; sum: number }[];
 }
 
 export interface DashboardData {
@@ -157,18 +159,34 @@ async function getMonthlyPL(count: number): Promise<MonthlyPLRow[]> {
   ]);
 
   const opexByMonth = new Map<string, number>();
+  const opexByMonthCategory = new Map<string, Map<string, number>>();
   for (const r of opexRows) {
     const cat = categoryName(r, expenseItemNames);
     if (isGoodsPurchaseCategory(cat)) continue;
     const month = dayOf(r.moment).slice(0, 7);
     opexByMonth.set(month, (opexByMonth.get(month) ?? 0) + r.sum);
+    const catMap = opexByMonthCategory.get(month) ?? new Map<string, number>();
+    catMap.set(cat, (catMap.get(cat) ?? 0) + r.sum);
+    opexByMonthCategory.set(month, catMap);
   }
 
   return months.map((m, i) => {
     const revenue = profitByMonth[i].reduce((s, r) => s + r.sellSum, 0);
+    const cogs = profitByMonth[i].reduce((s, r) => s + r.sellCostSum, 0);
     const grossProfit = profitByMonth[i].reduce((s, r) => s + r.profit, 0);
     const expenses = opexByMonth.get(m.label) ?? 0;
-    return { label: m.label, revenue, grossProfit, netProfit: grossProfit - expenses, expenses };
+    const expensesByCategory = [...(opexByMonthCategory.get(m.label) ?? new Map<string, number>()).entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, sum]) => ({ category, sum }));
+    return {
+      label: m.label,
+      revenue,
+      cogs,
+      grossProfit,
+      netProfit: grossProfit - expenses,
+      expenses,
+      expensesByCategory,
+    };
   });
 }
 
