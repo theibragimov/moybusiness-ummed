@@ -2,23 +2,33 @@
 
 import { useMemo, useState } from "react";
 import { MousePointerClick, ChevronDown, ChevronUp } from "lucide-react";
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fromMs, formatNumber } from "@/lib/format";
 import { useLanguage } from "@/lib/i18n/context";
 import type { MonthlyPLRow } from "@/lib/reports";
 
-const LINES: { key: "revenue" | "grossProfit" | "netProfit" | "expenses"; color: string }[] = [
+type LineKey = "revenue" | "grossProfit" | "netProfit" | "expenses";
+
+const LINES: { key: LineKey; color: string }[] = [
   { key: "revenue", color: "#3b63f5" },
   { key: "grossProfit", color: "#16a34a" },
   { key: "netProfit", color: "#0d9488" },
   { key: "expenses", color: "#dc2626" },
 ];
 
+const ALL_VISIBLE: Record<LineKey, boolean> = {
+  revenue: true,
+  grossProfit: true,
+  netProfit: true,
+  expenses: true,
+};
+
 export function MonthlyPLChart({ data }: { data: MonthlyPLRow[] }) {
   const { locale, t } = useLanguage();
   const [range, setRange] = useState<6 | 12>(12);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [visible, setVisible] = useState<Record<LineKey, boolean>>(ALL_VISIBLE);
   const money = (v: number) => `${formatNumber(fromMs(v), locale)} ${t.common.sum}`;
 
   const legendLabels: Record<string, string> = {
@@ -26,6 +36,19 @@ export function MonthlyPLChart({ data }: { data: MonthlyPLRow[] }) {
     grossProfit: t.dashboard.legendGrossProfit,
     netProfit: t.dashboard.legendNetProfit,
     expenses: t.dashboard.legendExpenses,
+  };
+
+  const toggleLine = (key: LineKey) => {
+    setVisible((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      // never allow hiding every line at once — that leaves an empty, confusing chart
+      if (!Object.values(next).some(Boolean)) return prev;
+      return next;
+    });
+  };
+
+  const showOnly = (key: LineKey) => {
+    setVisible({ revenue: false, grossProfit: false, netProfit: false, expenses: false, [key]: true });
   };
 
   const sliced = useMemo(() => (range === 6 ? data.slice(-6) : data), [data, range]);
@@ -50,7 +73,23 @@ export function MonthlyPLChart({ data }: { data: MonthlyPLRow[] }) {
 
   return (
     <div>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {LINES.map((l) => (
+            <button
+              key={l.key}
+              onClick={() => toggleLine(l.key)}
+              onDoubleClick={() => showOnly(l.key)}
+              title={t.dashboard.legendToggleHint}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-card transition-opacity ${
+                visible[l.key] ? "bg-white opacity-100" : "bg-white opacity-40"
+              }`}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: l.color }} />
+              {legendLabels[l.key]}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-1 rounded-full bg-surface p-1">
           {([6, 12] as const).map((n) => (
             <button
@@ -92,11 +131,7 @@ export function MonthlyPLChart({ data }: { data: MonthlyPLRow[] }) {
             formatter={(value: number, name: string) => [`${formatNumber(value, locale)} ${t.common.sum}`, legendLabels[name] ?? name]}
             labelFormatter={(_, payload) => payload?.[0]?.payload?.fullMonth ?? ""}
           />
-          <Legend
-            formatter={(value: string) => legendLabels[value] ?? value}
-            wrapperStyle={{ fontSize: 12, color: "#4a5568" }}
-          />
-          {LINES.map((l) => {
+          {LINES.filter((l) => visible[l.key]).map((l) => {
             const isSelected = (d: { fullMonth: string }) => d.fullMonth === selected?.label;
             return (
               <Line

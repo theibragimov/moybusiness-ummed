@@ -65,6 +65,7 @@ export const dictionaries = {
       formulaEquals: "=",
       viewExpenseCategories: "Xarajat toifalarini ko'rsatish",
       hideExpenseCategories: "Xarajat toifalarini yashirish",
+      legendToggleHint: "Ko'rsatish/yashirish uchun bosing, faqat shuni ko'rish uchun ikki marta bosing",
     },
     analytics: {
       title: "Mahsulot analitikasi",
@@ -334,6 +335,7 @@ export const dictionaries = {
       formulaEquals: "=",
       viewExpenseCategories: "Показать категории расходов",
       hideExpenseCategories: "Скрыть категории расходов",
+      legendToggleHint: "Нажмите, чтобы показать/скрыть; двойной клик — показать только эту линию",
     },
     analytics: {
       title: "Аналитика товаров",
