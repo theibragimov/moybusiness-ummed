@@ -7,6 +7,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card } from "@/components/Card";
 import { SalesLineChart } from "@/components/charts/SalesLineChart";
 import { CategoryPie } from "@/components/charts/CategoryPie";
+import { MonthlyPLChart } from "@/components/charts/MonthlyPLChart";
 import type { DashboardData } from "@/lib/reports";
 
 export function DashboardView({ data }: { data: DashboardData }) {
@@ -82,6 +83,11 @@ export function DashboardView({ data }: { data: DashboardData }) {
             </p>
           </div>
         </div>
+      </Card>
+
+      <Card title={t.dashboard.monthlyDynamicsTitle}>
+        <p className="-mt-2 mb-4 text-sm text-ink-500">{t.dashboard.monthlyDynamicsSubtitle}</p>
+        <MonthlyPLChart data={data.monthlyPL} />
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

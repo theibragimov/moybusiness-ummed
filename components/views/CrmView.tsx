@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, ChevronUp, ChevronDown, Users, Truck, IdCard } from "lucide-react";
+import { Search, ChevronUp, ChevronDown, Users, Truck, IdCard, UserX } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
@@ -411,6 +411,10 @@ export function CrmView({
   const customers = useMemo(() => bySegment("customer"), [rows]);
   const suppliers = useMemo(() => bySegment("supplier"), [rows]);
   const employees = useMemo(() => bySegment("employee"), [rows]);
+  const inactiveCount = useMemo(
+    () => customers.filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < oneMonthAgo).length,
+    [customers, oneMonthAgo]
+  );
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "customers", label: t.crm.customersTab },
@@ -427,10 +431,11 @@ export function CrmView({
         <p className="mt-1 text-sm text-ink-500">{t.crm.subtitle}</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={Users} label={t.crm.totalCustomers} value={formatNumber(customers.length, locale)} accent="brand" />
         <StatCard icon={Truck} label={t.crm.totalSuppliers} value={formatNumber(suppliers.length, locale)} accent="amber" />
         <StatCard icon={IdCard} label={t.crm.totalEmployees} value={formatNumber(employees.length, locale)} accent="emerald" />
+        <StatCard icon={UserX} label={t.crm.totalInactive} value={formatNumber(inactiveCount, locale)} accent="rose" />
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-full bg-white p-1.5 shadow-card">

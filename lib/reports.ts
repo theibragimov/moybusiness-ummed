@@ -106,6 +106,14 @@ async function listDemands(from: string, to: string): Promise<DemandRow[]> {
 
 // ---------- dashboard ----------
 
+export interface MonthlyPLRow {
+  label: string; // "YYYY-MM"
+  revenue: number;
+  grossProfit: number;
+  netProfit: number;
+  expenses: number; // operating expenses (excludes goods purchases, already in COGS)
+}
+
 export interface DashboardData {
   todaySalesSum: number;
   todaySalesCount: number;
@@ -125,6 +133,43 @@ export interface DashboardData {
   operatingExpensesSum: number;
   netProfit: number;
   netMargin: number;
+  // last 12 real calendar months, for the monthly revenue/profit/expenses trend chart
+  monthlyPL: MonthlyPLRow[];
+}
+
+/**
+ * Revenue, gross profit, net profit and operating expenses for each of the last
+ * `count` real calendar months (oldest first), for the dashboard trend chart.
+ */
+async function getMonthlyPL(count: number): Promise<MonthlyPLRow[]> {
+  const months = lastMonths(count);
+  const [profitByMonth, opexRows, expenseItemNames] = await Promise.all([
+    Promise.all(
+      months.map((m) =>
+        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+          momentFrom: momentFrom(m.start),
+          momentTo: momentTo(m.end),
+        }).catch(() => [] as ProfitByProductRow[])
+      )
+    ),
+    listCashOutflows(months[0].start, months[months.length - 1].end),
+    getExpenseItemNames(),
+  ]);
+
+  const opexByMonth = new Map<string, number>();
+  for (const r of opexRows) {
+    const cat = categoryName(r, expenseItemNames);
+    if (isGoodsPurchaseCategory(cat)) continue;
+    const month = dayOf(r.moment).slice(0, 7);
+    opexByMonth.set(month, (opexByMonth.get(month) ?? 0) + r.sum);
+  }
+
+  return months.map((m, i) => {
+    const revenue = profitByMonth[i].reduce((s, r) => s + r.sellSum, 0);
+    const grossProfit = profitByMonth[i].reduce((s, r) => s + r.profit, 0);
+    const expenses = opexByMonth.get(m.label) ?? 0;
+    return { label: m.label, revenue, grossProfit, netProfit: grossProfit - expenses, expenses };
+  });
 }
 
 export function getDashboardData(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
@@ -132,22 +177,24 @@ export function getDashboardData(todayYmd: string, monthStartYmd: string): Promi
 }
 
 async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
-  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, recentDemandsExpanded] = await Promise.all([
-    listDemands(monthStartYmd, todayYmd),
-    listCashOutflows(monthStartYmd, todayYmd),
-    msGet<{ money: { balance: number } }>("report/dashboard/money", {
-      momentFrom: momentFrom(todayYmd),
-      momentTo: momentTo(todayYmd),
-    }).catch(() => ({ money: { balance: 0 } })),
-    getExpenseItemNames(),
-    // small dedicated page so `expand` (capped at ~100 rows by MoySklad) still resolves
-    msGet<MsListResponse<DemandRow>>("entity/demand", {
-      filter: dateRangeFilter(monthStartYmd, todayYmd),
-      order: "moment,desc",
-      limit: 8,
-      expand: "agent",
-    }).catch(() => ({ rows: [] as DemandRow[] })),
-  ]);
+  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, recentDemandsExpanded, monthlyPL] =
+    await Promise.all([
+      listDemands(monthStartYmd, todayYmd),
+      listCashOutflows(monthStartYmd, todayYmd),
+      msGet<{ money: { balance: number } }>("report/dashboard/money", {
+        momentFrom: momentFrom(todayYmd),
+        momentTo: momentTo(todayYmd),
+      }).catch(() => ({ money: { balance: 0 } })),
+      getExpenseItemNames(),
+      // small dedicated page so `expand` (capped at ~100 rows by MoySklad) still resolves
+      msGet<MsListResponse<DemandRow>>("entity/demand", {
+        filter: dateRangeFilter(monthStartYmd, todayYmd),
+        order: "moment,desc",
+        limit: 8,
+        expand: "agent",
+      }).catch(() => ({ rows: [] as DemandRow[] })),
+      getMonthlyPL(12),
+    ]);
 
   const todayDemands = monthDemands.filter((d) => dayOf(d.moment) === todayYmd);
 
@@ -229,6 +276,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
     topProducts,
     recentShipments,
     expensesByCategory,
+    monthlyPL,
   };
 }
 
