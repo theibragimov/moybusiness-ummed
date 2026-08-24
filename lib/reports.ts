@@ -59,6 +59,18 @@ function isGoodsPurchaseCategory(name: string): boolean {
   return n.includes("закуп") || n.includes("покупк") || n.includes("xarid") || n.includes("zakup");
 }
 
+// "Перемещение" (transfer) is money moving between the company's own accounts
+// (card <-> cash), not money leaving the business — it must never be counted
+// as an expense.
+function isTransferCategory(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.includes("перемещен") || n.includes("ko'chirish") || n.includes("kochirish");
+}
+
+function isNonExpenseCategory(name: string): boolean {
+  return isGoodsPurchaseCategory(name) || isTransferCategory(name);
+}
+
 interface ProfitByProductRow {
   assortment: { name: string; code?: string };
   sellQuantity: number;
@@ -162,7 +174,7 @@ async function getMonthlyPL(count: number): Promise<MonthlyPLRow[]> {
   const opexByMonthCategory = new Map<string, Map<string, number>>();
   for (const r of opexRows) {
     const cat = categoryName(r, expenseItemNames);
-    if (isGoodsPurchaseCategory(cat)) continue;
+    if (isNonExpenseCategory(cat)) continue;
     const month = dayOf(r.moment).slice(0, 7);
     opexByMonth.set(month, (opexByMonth.get(month) ?? 0) + r.sum);
     const catMap = opexByMonthCategory.get(month) ?? new Map<string, number>();
@@ -247,8 +259,10 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
   let operatingExpensesSum = 0;
   for (const c of monthCashouts) {
     const cat = categoryName(c, expenseItemNames);
+    // Transfers between the company's own accounts (card <-> cash) are never spending.
+    if (isTransferCategory(cat)) continue;
     monthExpensesSum += c.sum;
-    if (!isGoodsPurchaseCategory(cat)) {
+    if (!isNonExpenseCategory(cat)) {
       operatingExpensesSum += c.sum;
       // Goods purchases are COGS, already reflected in the P&L above — leave them
       // out of the category breakdown so it matches the Expenses page.
@@ -522,7 +536,7 @@ async function getOpexBudgetAvg(): Promise<number> {
   const byMonth = new Map<string, number>();
   for (const r of rows) {
     const cat = categoryName(r, expenseItemNames);
-    if (isGoodsPurchaseCategory(cat)) continue;
+    if (isNonExpenseCategory(cat)) continue;
     const month = dayOf(r.moment).slice(0, 7);
     byMonth.set(month, (byMonth.get(month) ?? 0) + r.sum);
   }
@@ -547,7 +561,7 @@ async function getExpensesDataImpl(from: string, to: string): Promise<ExpensesDa
     const cat = categoryName(r, expenseItemNames);
     // Goods purchases are COGS, not an operating expense — same exclusion as the
     // dashboard's P&L, so this page's totals and category breakdown don't double-count them.
-    if (isGoodsPurchaseCategory(cat)) continue;
+    if (isNonExpenseCategory(cat)) continue;
     const day = dayOf(r.moment);
     byCategoryMap.set(cat, (byCategoryMap.get(cat) ?? 0) + r.sum);
     byDayMap.set(day, (byDayMap.get(day) ?? 0) + r.sum);
@@ -1087,7 +1101,7 @@ async function getNetProfitBudgetAvgImpl(): Promise<number> {
   const opexByMonth = new Map<string, number>();
   for (const r of opexRows) {
     const cat = categoryName(r, expenseItemNames);
-    if (isGoodsPurchaseCategory(cat)) continue;
+    if (isNonExpenseCategory(cat)) continue;
     const month = dayOf(r.moment).slice(0, 7);
     opexByMonth.set(month, (opexByMonth.get(month) ?? 0) + r.sum);
   }
@@ -1137,7 +1151,7 @@ async function getNetProfitDataImpl(from: string, to: string): Promise<NetProfit
   let opex = 0;
   for (const r of opexRows) {
     const cat = categoryName(r, expenseItemNames);
-    if (isGoodsPurchaseCategory(cat)) continue;
+    if (isNonExpenseCategory(cat)) continue;
     opex += r.sum;
   }
 
