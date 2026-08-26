@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getOutOfStockRecentSellers,
+  getYesterdaySoldNowOutOfStock,
   getRestockAlerts,
   getLowMarginProducts,
   getStockMoneyData,
@@ -20,11 +21,13 @@ import {
   STOCK_MONEY_BUTTON_LABEL,
   LOW_MARGIN_PRODUCTS_BUTTON_LABEL,
   CRM_BUTTON_LABEL,
+  PRODUCT_ANALYSIS_BUTTON_LABEL,
   MAIN_KEYBOARD,
   type InlineKeyboard,
 } from "@/lib/telegram";
 import {
   buildOosPage,
+  buildYesterdaySoldOosPage,
   buildRestockPage,
   buildLowMarginProductsPage,
   buildStockBucketPage,
@@ -75,6 +78,12 @@ const CRM_KEYBOARD: InlineKeyboard = {
   ],
 };
 
+const ANALYTICS_URL = "https://moybusiness-ummed.vercel.app/analytics";
+
+const PRODUCT_ANALYSIS_KEYBOARD: InlineKeyboard = {
+  inline_keyboard: [[{ text: "🔗 To'liq tahlil bilan tanishish", url: ANALYTICS_URL }]],
+};
+
 /** Replaces the "⏳ Yuklanmoqda…" placeholder with the real result once it's ready. */
 async function deliver(chatId: number, placeholderId: number | null, text: string, keyboard?: InlineKeyboard) {
   if (placeholderId !== null) {
@@ -110,6 +119,11 @@ async function handleMessage(chatId: number, text: string) {
       chatId: String(chatId),
       replyMarkup: CRM_KEYBOARD,
     });
+  } else if (text === PRODUCT_ANALYSIS_BUTTON_LABEL) {
+    await sendTelegramMessage("📊 <b>Mahsulotlar bo'yicha tahlil</b>\n\nSotuvlar, marja va ABC-tahlil — havola orqali to'liq tahlil bilan tanishing.", {
+      chatId: String(chatId),
+      replyMarkup: PRODUCT_ANALYSIS_KEYBOARD,
+    });
   }
 }
 
@@ -119,6 +133,9 @@ async function fetchPage(kind: string, param: string, offset: number): Promise<P
   }
   if (kind === "oos") {
     return buildOosPage(await getOutOfStockRecentSellers(), offset);
+  }
+  if (kind === "oosYesterday") {
+    return buildYesterdaySoldOosPage(await getYesterdaySoldNowOutOfStock(), offset);
   }
   if (kind === "lowmargin") {
     return buildLowMarginProductsPage(await getLowMarginProducts(), offset);

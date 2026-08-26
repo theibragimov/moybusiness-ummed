@@ -1,6 +1,6 @@
 {
   "crons": [
     { "path": "/api/cron/telegram?type=stock", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/telegram?type=margin", "schedule": "0 15 * * *" }
+    { "path": "/api/cron/telegram?type=margin", "schedule": "0 16 * * *" }
   ]
 }

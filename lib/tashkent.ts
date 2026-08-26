@@ -30,6 +30,11 @@ export function monthEndYmd(): string {
   return `${year}-${month}-${String(lastDay).padStart(2, "0")}`;
 }
 
+/** Whether today (in Tashkent) is the last calendar day of its month (the 28th–31st, whichever applies). */
+export function isLastDayOfMonthTashkent(): boolean {
+  return todayYmd() === monthEndYmd();
+}
+
 /** N days ago (inclusive range start) in Tashkent, as YYYY-MM-DD */
 export function daysAgoYmd(n: number): string {
   const d = new Date();

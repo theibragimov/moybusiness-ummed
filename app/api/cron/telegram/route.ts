@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts, getOutOfStockRecentSellers } from "@/lib/reports";
+import {
+  getRestockAlerts,
+  getLowMarginSalesAlerts,
+  getUrgentOutOfStockAlerts,
+  getOutOfStockRecentSellers,
+  getYesterdaySoldNowOutOfStock,
+  getMonthlyComparisonReport,
+} from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
+import {
+  formatLowMarginMessage,
+  buildRestockPage,
+  buildOosPage,
+  buildYesterdaySoldOosPage,
+  formatMonthlyComparisonMessage,
+} from "@/lib/alertMessages";
+import { isLastDayOfMonthTashkent } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,8 +41,12 @@ function authorized(req: NextRequest): boolean {
 // plan caps a project at 2 cron jobs — this one and the margin check below. The
 // message shows the full current list (not just what's new) so its "Keyingisi ➡️"
 // pagination stays consistent with the on-demand bot buttons.
-async function runStockCheck(): Promise<{ restock: number; outOfStock: number }> {
-  const [restock, urgentOutOfStock] = await Promise.all([getRestockAlerts(), getUrgentOutOfStockAlerts()]);
+async function runStockCheck(): Promise<{ restock: number; outOfStock: number; outOfStockYesterday: number }> {
+  const [restock, urgentOutOfStock, yesterdaySoldOutOfStock] = await Promise.all([
+    getRestockAlerts(),
+    getUrgentOutOfStockAlerts(),
+    getYesterdaySoldNowOutOfStock(),
+  ]);
   if (restock.length > 0) {
     const page = buildRestockPage(restock);
     await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
@@ -38,7 +56,11 @@ async function runStockCheck(): Promise<{ restock: number; outOfStock: number }>
     const page = buildOosPage(allOutOfStock);
     await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
   }
-  return { restock: restock.length, outOfStock: urgentOutOfStock.length };
+  if (yesterdaySoldOutOfStock.length > 0) {
+    const page = buildYesterdaySoldOosPage(yesterdaySoldOutOfStock);
+    await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
+  }
+  return { restock: restock.length, outOfStock: urgentOutOfStock.length, outOfStockYesterday: yesterdaySoldOutOfStock.length };
 }
 
 async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {
@@ -46,6 +68,18 @@ async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {
   if (sales.length === 0) return { sent: false, count: 0 };
   await sendTelegramMessage(formatLowMarginMessage(sales));
   return { sent: true, count: sales.length };
+}
+
+// Piggybacks on the "margin" cron (rather than its own schedule) because Vercel's
+// Hobby plan caps a project at 2 cron jobs, both already spoken for by
+// runStockCheck and runMarginCheck. The "margin" cron's time was moved to 21:00
+// Tashkent specifically so this fires at the requested hour; it's a no-op on
+// every day but the last of the month.
+async function runMonthlyReport(): Promise<{ sent: boolean }> {
+  if (!isLastDayOfMonthTashkent()) return { sent: false };
+  const report = await getMonthlyComparisonReport();
+  await sendTelegramMessage(formatMonthlyComparisonMessage(report));
+  return { sent: true };
 }
 
 export async function GET(req: NextRequest) {
@@ -56,7 +90,11 @@ export async function GET(req: NextRequest) {
   const type = req.nextUrl.searchParams.get("type");
   try {
     if (type === "stock") return NextResponse.json(await runStockCheck());
-    if (type === "margin") return NextResponse.json(await runMarginCheck());
+    if (type === "margin") {
+      const margin = await runMarginCheck();
+      const monthly = await runMonthlyReport();
+      return NextResponse.json({ margin, monthly });
+    }
     return NextResponse.json({ error: "pass ?type=stock or ?type=margin" }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

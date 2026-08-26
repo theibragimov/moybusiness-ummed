@@ -202,6 +202,78 @@ async function getMonthlyPL(count: number): Promise<MonthlyPLRow[]> {
   });
 }
 
+// ---------- month-end summary (Telegram, last day of the month) ----------
+
+export interface MonthlyComparisonReport {
+  currentLabel: string; // "YYYY-MM"
+  revenue: number;
+  revenueChangePct: number | null;
+  expenses: number;
+  expensesChangePct: number | null;
+  profit: number;
+  profitChangePct: number | null;
+  qtySold: number;
+  qtySoldChangePct: number | null;
+}
+
+/** Percent change from `prev` to `cur`; null when `prev` is 0 (no baseline to compare against). */
+function pctChange(cur: number, prev: number): number | null {
+  if (prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+/**
+ * This calendar month vs the previous one — revenue, expenses (all cash
+ * outflows excluding transfers, same as the dashboard's "Bu oy xarajat"),
+ * net profit (gross profit minus operating expenses, same as the dashboard's
+ * "Sof foyda"), and units sold, each with its month-over-month % change.
+ */
+export async function getMonthlyComparisonReport(): Promise<MonthlyComparisonReport> {
+  const [prevMonth, curMonth] = lastMonths(2);
+  const [profitByMonth, cashoutsByMonth, expenseItemNames] = await Promise.all([
+    Promise.all(
+      [prevMonth, curMonth].map((m) =>
+        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+          momentFrom: momentFrom(m.start),
+          momentTo: momentTo(m.end),
+        }).catch(() => [] as ProfitByProductRow[])
+      )
+    ),
+    Promise.all([prevMonth, curMonth].map((m) => listCashOutflows(m.start, m.end))),
+    getExpenseItemNames(),
+  ]);
+
+  const summarize = (profitRows: ProfitByProductRow[], cashouts: CashoutRow[]) => {
+    const revenue = profitRows.reduce((s, r) => s + r.sellSum, 0);
+    const grossProfit = profitRows.reduce((s, r) => s + r.profit, 0);
+    const qtySold = profitRows.reduce((s, r) => s + Math.max(r.sellQuantity, 0), 0);
+    let expenses = 0;
+    let operatingExpenses = 0;
+    for (const c of cashouts) {
+      const cat = categoryName(c, expenseItemNames);
+      if (isTransferCategory(cat)) continue;
+      expenses += c.sum;
+      if (!isNonExpenseCategory(cat)) operatingExpenses += c.sum;
+    }
+    return { revenue, expenses, profit: grossProfit - operatingExpenses, qtySold };
+  };
+
+  const prev = summarize(profitByMonth[0], cashoutsByMonth[0]);
+  const cur = summarize(profitByMonth[1], cashoutsByMonth[1]);
+
+  return {
+    currentLabel: curMonth.label,
+    revenue: cur.revenue,
+    revenueChangePct: pctChange(cur.revenue, prev.revenue),
+    expenses: cur.expenses,
+    expensesChangePct: pctChange(cur.expenses, prev.expenses),
+    profit: cur.profit,
+    profitChangePct: pctChange(cur.profit, prev.profit),
+    qtySold: cur.qtySold,
+    qtySoldChangePct: pctChange(cur.qtySold, prev.qtySold),
+  };
+}
+
 export function getDashboardData(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
   return cached(`dashboard:${todayYmd}:${monthStartYmd}`, () => getDashboardDataImpl(todayYmd, monthStartYmd));
 }
@@ -620,6 +692,7 @@ export interface CounterpartyRow {
   lastDemandDate: string | null;
   balance: number;
   segment: CounterpartySegment;
+  stateName?: string;
 }
 
 interface CounterpartyEntityRow {
@@ -645,6 +718,7 @@ function classifySegment(stateName: string | undefined): CounterpartySegment {
 interface CounterpartyMeta {
   name: string;
   segment: CounterpartySegment;
+  stateName?: string;
 }
 
 async function getCounterpartyMeta(): Promise<Map<string, CounterpartyMeta>> {
@@ -657,9 +731,17 @@ async function getCounterpartyMeta(): Promise<Map<string, CounterpartyMeta>> {
   for (const r of rows) {
     const stateId = r.state?.meta.href ? idFromHref(r.state.meta.href) : undefined;
     const stateName = stateId ? stateNames.get(stateId) : undefined;
-    result.set(r.id, { name: r.name, segment: classifySegment(stateName) });
+    result.set(r.id, { name: r.name, segment: classifySegment(stateName), stateName });
   }
   return result;
+}
+
+/** MoySklad counterparty state name for a pharmacy ("Аптека") — see `isPharmacyDebtor`. */
+const PHARMACY_STATE_NAME = "аптека";
+
+/** Whether a counterparty's status is specifically "Аптека" (pharmacist/Aptekachi), not e.g. "Оптомшик" (wholesaler). */
+function isPharmacyDebtor(c: { stateName?: string }): boolean {
+  return c.stateName?.trim().toLowerCase() === PHARMACY_STATE_NAME;
 }
 
 export function getCounterparties(): Promise<CounterpartyRow[]> {
@@ -681,6 +763,7 @@ async function getCounterpartiesImpl(): Promise<CounterpartyRow[]> {
     lastDemandDate: r.lastDemandDate,
     balance: r.balance,
     segment: meta.get(r.counterparty.id)?.segment ?? "customer",
+    stateName: meta.get(r.counterparty.id)?.stateName,
   }));
 }
 
@@ -1503,6 +1586,41 @@ export async function getUrgentOutOfStockAlerts(): Promise<OutOfStockRecentSelle
   return rows.filter((r) => r.qty10 > URGENT_OUT_OF_STOCK_QTY10_MIN);
 }
 
+export interface YesterdaySoldOutOfStockRow {
+  name: string;
+  stock: number;
+  qtyYesterday: number;
+}
+
+/**
+ * Products at zero (or negative) stock today that still sold yesterday — catches a
+ * fast-moving item running out overnight even when it hasn't sold enough over the
+ * wider 10-day window to trip `getUrgentOutOfStockAlerts`. Meant for the daily
+ * morning push, not the on-demand button.
+ */
+export async function getYesterdaySoldNowOutOfStock(): Promise<YesterdaySoldOutOfStockRow[]> {
+  const yesterday = daysAgoYmd(1);
+  const [stockRows, rowsYesterday] = await Promise.all([
+    getStockSnapshot(),
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(yesterday),
+      momentTo: momentTo(yesterday),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
+
+  const qtyByName = new Map<string, number>();
+  for (const r of rowsYesterday) {
+    if (r.sellQuantity <= 0) continue;
+    qtyByName.set(r.assortment.name, (qtyByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+
+  return stockRows
+    .filter((r) => r.stock <= 0)
+    .map((r) => ({ name: r.name, stock: r.stock, qtyYesterday: qtyByName.get(r.name) ?? 0 }))
+    .filter((r) => r.qtyYesterday > 0)
+    .sort((a, b) => b.qtyYesterday - a.qtyYesterday);
+}
+
 /** Below this margin (as a fraction, e.g. 0.05 = 5%) a sold line item is flagged. */
 const LOW_MARGIN_THRESHOLD = 0.05;
 
@@ -1565,6 +1683,47 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
     }
   }
   return results;
+}
+
+// How far back to look for the sale that might have just emptied a product's stock.
+// Wide enough to survive webhook retries/lag; narrow enough to only cover "just now".
+const JUST_SOLD_OUT_LOOKBACK_HOURS = 1 / 3; // 20 minutes
+
+export interface JustSoldOutRow {
+  name: string;
+  stock: number;
+}
+
+/**
+ * Products sold within the last ~20 minutes that are now at zero (or negative)
+ * stock — meant for an immediate, per-sale push the moment a product runs out,
+ * as opposed to the daily digest in `getOutOfStockRecentSellers`.
+ */
+export async function getJustSoldOutProducts(): Promise<JustSoldOutRow[]> {
+  const demands = await fetchAllRows<DemandRow>(
+    "entity/demand",
+    { filter: buildFilter([`moment>=${hoursAgoMoment(JUST_SOLD_OUT_LOOKBACK_HOURS)}`]) },
+    200
+  );
+  if (demands.length === 0) return [];
+
+  const soldNames = new Set<string>();
+  for (const d of demands) {
+    const positions = await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]);
+    for (const p of positions) {
+      if (p.quantity > 0) soldNames.add(p.assortment.name);
+    }
+  }
+  if (soldNames.size === 0) return [];
+
+  // Bypasses the shared 15-minute stock cache: the whole point of this check is
+  // "is it at zero right now", so a stale cached snapshot would defeat it.
+  const stockRows = await fetchAllRows<StockSnapshotRow>("report/stock/all", {}, 5000).catch(
+    () => [] as StockSnapshotRow[]
+  );
+  return stockRows
+    .filter((r) => soldNames.has(r.name) && r.stock <= 0)
+    .map((r) => ({ name: r.name, stock: r.stock }));
 }
 
 // ---------- warehouse money (Telegram "💰 Ombor puli" button) ----------
@@ -1716,11 +1875,12 @@ export interface DebtorRow {
  * Customers who owe us money (negative balance = shipped more than paid — see
  * getDebtsData above). Explicitly customer-only: suppliers/employees can also
  * carry a balance, but a "debtor" list here means people who owe US, not the
- * other way around.
+ * other way around. Further narrowed to pharmacies ("Аптека" status) only —
+ * wholesalers ("Оптомшик") and other statuses are excluded from both debtor lists.
  */
 async function getDebtorCandidates(): Promise<CounterpartyRow[]> {
   const counterparties = await getCounterparties();
-  return counterparties.filter((c) => c.segment === "customer" && c.balance < 0);
+  return counterparties.filter((c) => c.segment === "customer" && c.balance < 0 && isPharmacyDebtor(c));
 }
 
 /** Debtors who haven't made a single payment in the last 30 days (or ever, going back 90 days). */

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts, getOutOfStockRecentSellers } from "@/lib/reports";
-import { sendTelegramMessage } from "@/lib/telegram";
+import {
+  getRestockAlerts,
+  getLowMarginSalesAlerts,
+  getUrgentOutOfStockAlerts,
+  getOutOfStockRecentSellers,
+  getJustSoldOutProducts,
+} from "@/lib/reports";
+import { sendTelegramMessage, escapeHtml } from "@/lib/telegram";
 import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
+import { formatNumber } from "@/lib/format";
 import { todayYmd } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
@@ -37,10 +44,11 @@ export async function POST(req: NextRequest) {
 
   const today = todayYmd();
   try {
-    const [restock, sales, urgentOutOfStock] = await Promise.all([
+    const [restock, sales, urgentOutOfStock, justSoldOut] = await Promise.all([
       getRestockAlerts(),
       getLowMarginSalesAlerts(0.25), // last 15 min — this fires right after the sale
       getUrgentOutOfStockAlerts(),
+      getJustSoldOutProducts(),
     ]);
 
     // One digest per day, not one per product — see shouldAlert above. The
@@ -63,11 +71,23 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
     }
 
+    // Fires the instant a sale empties a product, at most once per product per day
+    // (see `shouldAlert`) — a later sale of the same already-empty product the same
+    // day stays quiet instead of re-alerting.
+    const newlyOut = justSoldOut.filter((r) => shouldAlert(`zero-stock:${r.name}`, today));
+    if (newlyOut.length > 0) {
+      const lines = newlyOut
+        .map((r) => `⛔ <b>${escapeHtml(r.name)}</b> — qoldiq: <b>${formatNumber(r.stock)}</b>`)
+        .join("\n");
+      await sendTelegramMessage(`🔔 <b>Hozirgina tugadi</b>\n\n${lines}`);
+    }
+
     return NextResponse.json({
       ok: true,
       restock: sendRestock ? restock.length : 0,
       lowMarginSales: sales.length,
       outOfStock: sendOutOfStock ? urgentOutOfStock.length : 0,
+      justSoldOut: newlyOut.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

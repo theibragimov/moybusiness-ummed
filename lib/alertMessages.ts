@@ -5,17 +5,19 @@ import type {
   RestockAlertRow,
   LowMarginSaleRow,
   OutOfStockRecentSellerRow,
+  YesterdaySoldOutOfStockRow,
   LowMarginProductRow,
   StockMoneyData,
   StockBucketProductRow,
   StockValueBucket,
   DebtorRow,
+  MonthlyComparisonReport,
 } from "./reports";
 import { dayOf } from "./tashkent";
 
 export const PAGE_SIZE = 25;
 
-export type PageKind = "restock" | "oos" | "lowmargin" | "bucket" | "debtor30" | "debtor3mo";
+export type PageKind = "restock" | "oos" | "oosYesterday" | "lowmargin" | "bucket" | "debtor30" | "debtor3mo";
 
 export interface Page {
   text: string;
@@ -28,7 +30,7 @@ export function encodePageCallback(kind: PageKind, param: string, offset: number
 }
 
 export function parsePageCallback(data: string): { kind: PageKind; param: string; offset: number } | null {
-  const m = /^pg:(restock|oos|lowmargin|bucket|debtor30|debtor3mo):([a-z-]+):(\d+)$/.exec(data);
+  const m = /^pg:(restock|oos|oosYesterday|lowmargin|bucket|debtor30|debtor3mo):([a-z-]+):(\d+)$/.exec(data);
   if (!m) return null;
   return { kind: m[1] as PageKind, param: m[2], offset: Number(m[3]) };
 }
@@ -105,6 +107,20 @@ export function buildOosPage(rows: OutOfStockRecentSellerRow[], offset = 0): Pag
   );
 }
 
+const OOS_YESTERDAY_HEADER = "🚨 <b>Kecha sotilgan, lekin bugun tugagan mahsulotlar</b>";
+
+export function buildYesterdaySoldOosPage(rows: YesterdaySoldOutOfStockRow[], offset = 0): Page {
+  return buildPage(
+    OOS_YESTERDAY_HEADER,
+    "Kecha sotilgan, bugun tugagan mahsulot yo'q.",
+    rows,
+    offset,
+    (r, i) => `${i}. <b>${escapeHtml(r.name)}</b>\n📦 Qoldiq: <b>${formatNumber(r.stock)}</b>\n📈 Kecha sotildi: <b>${formatNumber(r.qtyYesterday)}</b> dona`,
+    "oosYesterday",
+    "-"
+  );
+}
+
 const LOW_MARGIN_PRODUCTS_HEADER = "📉 <b>Past marjali mahsulotlar (&lt;15%)</b>";
 
 export function buildLowMarginProductsPage(rows: LowMarginProductRow[], offset = 0): Page {
@@ -172,4 +188,21 @@ export function formatLowMarginMessage(sales: LowMarginSaleRow[], limit = 25): s
 export function formatStockMoneyMessage(data: StockMoneyData): string {
   const lines = data.buckets.map((b) => `${b.label}: <b>${formatCompactMoney(b.value)}</b> so'm`);
   return `💰 <b>Ombor puli</b>\n\nJami tovar qiymati: <b>${formatCompactMoney(data.totalValue)}</b> so'm\n\n${lines.join("\n")}`;
+}
+
+function formatChangePct(pct: number | null): string {
+  if (pct === null) return "";
+  const arrow = pct >= 0 ? "📈" : "📉";
+  const sign = pct >= 0 ? "+" : "";
+  return ` (${arrow} ${sign}${pct.toFixed(1)}% o'tgan oyga nisbatan)`;
+}
+
+export function formatMonthlyComparisonMessage(r: MonthlyComparisonReport): string {
+  return (
+    `🗓️ <b>Oylik hisobot — ${r.currentLabel}</b>\n\n` +
+    `💵 Bu oygi tushum: <b>${formatMoney(r.revenue)}</b> so'm${formatChangePct(r.revenueChangePct)}\n\n` +
+    `💸 Bu oygi xarajat: <b>${formatMoney(r.expenses)}</b> so'm${formatChangePct(r.expensesChangePct)}\n\n` +
+    `📊 Bu oygi foyda: <b>${formatMoney(r.profit)}</b> so'm${formatChangePct(r.profitChangePct)}\n\n` +
+    `📦 Sotilgan mahsulotlar soni: <b>${formatNumber(r.qtySold)}</b> dona${formatChangePct(r.qtySoldChangePct)}`
+  );
 }
