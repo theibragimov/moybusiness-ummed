@@ -14,6 +14,7 @@ import {
   sendTelegramMessage,
   editTelegramMessage,
   answerCallbackQuery,
+  isAllowedTelegramChat,
   OUT_OF_STOCK_BUTTON_LABEL,
   STOCK_MONEY_BUTTON_LABEL,
   LOW_MARGIN_PRODUCTS_BUTTON_LABEL,
@@ -52,16 +53,6 @@ function authorized(req: NextRequest): boolean {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!secret) return false;
   return req.headers.get("x-telegram-bot-api-secret-token") === secret;
-}
-
-/**
- * The secret token above only proves a request really came from Telegram — it says
- * nothing about WHICH chat sent it. Without this check, anyone who finds the bot
- * and presses /start gets full read access to stock, margin, and debtor data.
- */
-function isAllowedChat(chatId: number): boolean {
-  const allowed = process.env.TELEGRAM_CHAT_ID;
-  return !!allowed && String(chatId) === allowed;
 }
 
 const STOCK_BUCKETS: StockValueBucket[] = ["fast", "normal", "slow", "dead"];
@@ -148,12 +139,19 @@ export async function POST(req: NextRequest) {
   const update = (await req.json().catch(() => null)) as TelegramUpdate | null;
 
   try {
-    if (update?.message?.text && update.message.chat.id !== undefined && isAllowedChat(update.message.chat.id)) {
+    if (update?.message?.text && update.message.chat.id !== undefined && isAllowedTelegramChat(update.message.chat.id)) {
       await handleMessage(update.message.chat.id, update.message.text);
+    } else if (update?.message?.text === "/start" && update.message.chat.id !== undefined) {
+      // Not on the allowed list yet: hand back the chat id (harmless — no business
+      // data) so the owner can add it to TELEGRAM_CHAT_IDS without digging through logs.
+      await sendTelegramMessage(
+        `Sizning chat ID'ingiz: <code>${update.message.chat.id}</code>\n\nBuni administratorga yuboring — u sizni ro'yxatga qo'shgach, botdan foydalana olasiz.`,
+        { chatId: String(update.message.chat.id) }
+      );
     } else if (
       update?.callback_query?.data &&
       update.callback_query.message &&
-      isAllowedChat(update.callback_query.message.chat.id)
+      isAllowedTelegramChat(update.callback_query.message.chat.id)
     ) {
       const { chat, message_id } = update.callback_query.message;
       await handleCallbackQuery(update.callback_query.id, chat.id, message_id, update.callback_query.data);

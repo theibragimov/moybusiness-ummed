@@ -10,10 +10,32 @@ function token(): string {
   return t;
 }
 
-function chatId(): string {
-  const id = process.env.TELEGRAM_CHAT_ID;
-  if (!id) throw new Error("TELEGRAM_CHAT_ID is not set");
-  return id;
+/**
+ * Everyone allowed to use the bot. TELEGRAM_CHAT_IDS is a comma-separated list
+ * (team use); TELEGRAM_CHAT_ID (singular) still works as a one-person fallback.
+ * Also the set of chats a broadcast (proactive alert) goes out to.
+ */
+function chatIds(): string[] {
+  const multi = process.env.TELEGRAM_CHAT_IDS;
+  if (multi) {
+    const ids = multi
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length > 0) return ids;
+  }
+  const single = process.env.TELEGRAM_CHAT_ID;
+  if (!single) throw new Error("TELEGRAM_CHAT_ID or TELEGRAM_CHAT_IDS is not set");
+  return [single];
+}
+
+/** Whether a chat is allowed to use the bot's commands/buttons. */
+export function isAllowedTelegramChat(chatId: number | string): boolean {
+  try {
+    return chatIds().includes(String(chatId));
+  } catch {
+    return false;
+  }
 }
 
 function chunkByLines(text: string, max: number): string[] {
@@ -62,21 +84,21 @@ export interface InlineKeyboard {
 }
 
 interface SendOptions {
-  /** Defaults to TELEGRAM_CHAT_ID — pass a different chat to reply to whoever triggered a bot command. */
+  /** Defaults to every chat in TELEGRAM_CHAT_IDS/TELEGRAM_CHAT_ID — pass one chat to reply to whoever triggered a bot command instead of broadcasting. */
   chatId?: string;
   replyMarkup?: ReplyKeyboard | InlineKeyboard;
 }
 
-async function sendOne(text: string, opts: SendOptions = {}): Promise<void> {
+async function sendOne(text: string, targetChatId: string, replyMarkup?: ReplyKeyboard | InlineKeyboard): Promise<void> {
   const res = await fetch(`${API_BASE}/bot${token()}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: opts.chatId ?? chatId(),
+      chat_id: targetChatId,
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
-      ...(opts.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   });
   if (!res.ok) {
@@ -94,13 +116,21 @@ export async function answerCallbackQuery(callbackQueryId: string): Promise<void
   }).catch(() => undefined);
 }
 
-/** Sends a Telegram message, splitting it across multiple messages if it exceeds Telegram's length cap. */
+/**
+ * Sends a Telegram message, splitting it across multiple messages if it exceeds
+ * Telegram's length cap. With no explicit `chatId`, broadcasts to every allowed
+ * chat (used for proactive alerts); pass `chatId` to reply to one specific chat
+ * (used when answering a bot command/button).
+ */
 export async function sendTelegramMessage(text: string, opts: SendOptions = {}): Promise<void> {
+  const targets = opts.chatId ? [opts.chatId] : chatIds();
   const chunks = chunkByLines(text, MAX_MESSAGE_LEN);
-  for (let i = 0; i < chunks.length; i++) {
-    // A reply keyboard only needs to be (re)attached once; repeating it on every
-    // chunk would just resend the same keyboard redundantly.
-    await sendOne(chunks[i], i === chunks.length - 1 ? opts : { chatId: opts.chatId });
+  for (const target of targets) {
+    for (let i = 0; i < chunks.length; i++) {
+      // A reply keyboard only needs to be (re)attached once; repeating it on every
+      // chunk would just resend the same keyboard redundantly.
+      await sendOne(chunks[i], target, i === chunks.length - 1 ? opts.replyMarkup : undefined);
+    }
   }
 }
 
