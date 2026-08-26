@@ -1,19 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOutOfStockRecentSellers, getStockMoneyData, getStockBucketProducts, STOCK_BUCKET_LABELS } from "@/lib/reports";
+import {
+  getOutOfStockRecentSellers,
+  getRestockAlerts,
+  getLowMarginProducts,
+  getStockMoneyData,
+  getStockBucketProducts,
+  STOCK_BUCKET_LABELS,
+  type StockValueBucket,
+} from "@/lib/reports";
 import {
   sendTelegramMessage,
+  editTelegramMessage,
   answerCallbackQuery,
   OUT_OF_STOCK_BUTTON_LABEL,
   STOCK_MONEY_BUTTON_LABEL,
+  LOW_MARGIN_PRODUCTS_BUTTON_LABEL,
   MAIN_KEYBOARD,
   type InlineKeyboard,
 } from "@/lib/telegram";
 import {
-  formatOutOfStockMessage,
+  buildOosPage,
+  buildRestockPage,
+  buildLowMarginProductsPage,
+  buildStockBucketPage,
   formatStockMoneyMessage,
-  formatStockBucketMessage,
-  stockBucketCallbackData,
-  parseStockBucketCallback,
+  encodePageCallback,
+  parsePageCallback,
+  type Page,
 } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +39,7 @@ interface TelegramUpdate {
   callback_query?: {
     id: string;
     data?: string;
-    message?: { chat: { id: number } };
+    message?: { chat: { id: number }; message_id: number };
   };
 }
 
@@ -36,24 +49,28 @@ function authorized(req: NextRequest): boolean {
   return req.headers.get("x-telegram-bot-api-secret-token") === secret;
 }
 
+const STOCK_BUCKETS: StockValueBucket[] = ["fast", "normal", "slow", "dead"];
+
 const STOCK_BUCKET_KEYBOARD: InlineKeyboard = {
-  inline_keyboard: (["fast", "normal", "slow", "dead"] as const).map((bucket) => [
-    { text: STOCK_BUCKET_LABELS[bucket], callback_data: stockBucketCallbackData(bucket) },
+  inline_keyboard: STOCK_BUCKETS.map((bucket) => [
+    { text: STOCK_BUCKET_LABELS[bucket], callback_data: encodePageCallback("bucket", bucket, 0) },
   ]),
 };
 
 async function handleMessage(chatId: number, text: string) {
   if (text === "/start") {
-    await sendTelegramMessage(
-      "Salom! Quyidagi tugmalar orqali ombor holatini tekshirishingiz mumkin.",
-      { chatId: String(chatId), replyMarkup: MAIN_KEYBOARD }
-    );
-  } else if (text === OUT_OF_STOCK_BUTTON_LABEL) {
-    const rows = await getOutOfStockRecentSellers();
-    await sendTelegramMessage(formatOutOfStockMessage(rows), {
+    await sendTelegramMessage("Salom! Quyidagi tugmalar orqali ombor holatini tekshirishingiz mumkin.", {
       chatId: String(chatId),
       replyMarkup: MAIN_KEYBOARD,
     });
+  } else if (text === OUT_OF_STOCK_BUTTON_LABEL) {
+    const rows = await getOutOfStockRecentSellers();
+    const page = buildOosPage(rows);
+    await sendTelegramMessage(page.text, { chatId: String(chatId), replyMarkup: page.keyboard ?? MAIN_KEYBOARD });
+  } else if (text === LOW_MARGIN_PRODUCTS_BUTTON_LABEL) {
+    const rows = await getLowMarginProducts();
+    const page = buildLowMarginProductsPage(rows);
+    await sendTelegramMessage(page.text, { chatId: String(chatId), replyMarkup: page.keyboard ?? MAIN_KEYBOARD });
   } else if (text === STOCK_MONEY_BUTTON_LABEL) {
     const data = await getStockMoneyData();
     await sendTelegramMessage(formatStockMoneyMessage(data), {
@@ -63,14 +80,31 @@ async function handleMessage(chatId: number, text: string) {
   }
 }
 
-async function handleCallbackQuery(callbackQueryId: string, chatId: number, data: string) {
-  const bucket = parseStockBucketCallback(data);
+async function fetchPage(kind: string, param: string, offset: number): Promise<Page | null> {
+  if (kind === "restock") {
+    return buildRestockPage(await getRestockAlerts(), offset);
+  }
+  if (kind === "oos") {
+    return buildOosPage(await getOutOfStockRecentSellers(), offset);
+  }
+  if (kind === "lowmargin") {
+    return buildLowMarginProductsPage(await getLowMarginProducts(), offset);
+  }
+  if (kind === "bucket" && STOCK_BUCKETS.includes(param as StockValueBucket)) {
+    const bucket = param as StockValueBucket;
+    return buildStockBucketPage(bucket, STOCK_BUCKET_LABELS[bucket], await getStockBucketProducts(bucket), offset);
+  }
+  return null;
+}
+
+async function handleCallbackQuery(callbackQueryId: string, chatId: number, messageId: number, data: string) {
   await answerCallbackQuery(callbackQueryId);
-  if (!bucket) return;
-  const rows = await getStockBucketProducts(bucket);
-  await sendTelegramMessage(formatStockBucketMessage(STOCK_BUCKET_LABELS[bucket], rows), {
-    chatId: String(chatId),
-  });
+  const parsed = parsePageCallback(data);
+  if (!parsed) return;
+  const page = await fetchPage(parsed.kind, parsed.param, parsed.offset);
+  if (!page) return;
+  // "Keyingisi ➡️" replaces the same message in place instead of piling up new ones.
+  await editTelegramMessage(String(chatId), messageId, page.text, page.keyboard);
 }
 
 export async function POST(req: NextRequest) {
@@ -83,8 +117,9 @@ export async function POST(req: NextRequest) {
   try {
     if (update?.message?.text && update.message.chat.id !== undefined) {
       await handleMessage(update.message.chat.id, update.message.text);
-    } else if (update?.callback_query?.data && update.callback_query.message?.chat.id !== undefined) {
-      await handleCallbackQuery(update.callback_query.id, update.callback_query.message.chat.id, update.callback_query.data);
+    } else if (update?.callback_query?.data && update.callback_query.message) {
+      const { chat, message_id } = update.callback_query.message;
+      await handleCallbackQuery(update.callback_query.id, chat.id, message_id, update.callback_query.data);
     }
   } catch {
     // Swallow errors here — Telegram retries a non-200 response, and a transient

@@ -1641,3 +1641,27 @@ export async function getStockBucketProducts(bucket: StockValueBucket): Promise<
     .map((r) => ({ name: r.name, stock: r.stock, stockValue: r.stockValue, qty30: r.qty30, daysOfStockLeft: r.daysOfStockLeft }))
     .sort((a, b) => b.stockValue - a.stockValue);
 }
+
+/** Below this margin (as a fraction, e.g. 0.15 = 15%), a product is flagged in the on-demand "low margin products" list. */
+const LOW_MARGIN_PRODUCT_THRESHOLD = 0.15;
+const LOW_MARGIN_PRODUCT_LOOKBACK_DAYS = 30;
+
+export interface LowMarginProductRow {
+  name: string;
+  margin: number;
+  qty: number;
+}
+
+/** Products sold in the last 30 days at an overall margin below 15% (MoySklad's own costed margin, not a per-line approximation). */
+export async function getLowMarginProducts(): Promise<LowMarginProductRow[]> {
+  const today = todayYmd();
+  const from = daysAgoYmd(LOW_MARGIN_PRODUCT_LOOKBACK_DAYS - 1);
+  const rows = await fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+    momentFrom: momentFrom(from),
+    momentTo: momentTo(today),
+  }).catch(() => [] as ProfitByProductRow[]);
+  return rows
+    .filter((r) => r.sellQuantity > 0 && r.margin < LOW_MARGIN_PRODUCT_THRESHOLD)
+    .map((r) => ({ name: r.assortment.name, margin: r.margin, qty: r.sellQuantity }))
+    .sort((a, b) => a.margin - b.margin);
+}

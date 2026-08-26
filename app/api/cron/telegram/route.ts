@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts } from "@/lib/reports";
+import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts, getOutOfStockRecentSellers } from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { formatRestockMessage, formatLowMarginMessage, formatOutOfStockMessage } from "@/lib/alertMessages";
+import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +23,21 @@ function authorized(req: NextRequest): boolean {
 }
 
 // Folded into one "stock" job (rather than its own cron) because Vercel's Hobby
-// plan caps a project at 2 cron jobs — this one and the margin check below.
+// plan caps a project at 2 cron jobs — this one and the margin check below. The
+// message shows the full current list (not just what's new) so its "Keyingisi ➡️"
+// pagination stays consistent with the on-demand bot buttons.
 async function runStockCheck(): Promise<{ restock: number; outOfStock: number }> {
-  const [restock, outOfStock] = await Promise.all([getRestockAlerts(), getUrgentOutOfStockAlerts()]);
-  if (restock.length > 0) await sendTelegramMessage(formatRestockMessage(restock));
-  if (outOfStock.length > 0) await sendTelegramMessage(formatOutOfStockMessage(outOfStock));
-  return { restock: restock.length, outOfStock: outOfStock.length };
+  const [restock, urgentOutOfStock] = await Promise.all([getRestockAlerts(), getUrgentOutOfStockAlerts()]);
+  if (restock.length > 0) {
+    const page = buildRestockPage(restock);
+    await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
+  }
+  if (urgentOutOfStock.length > 0) {
+    const allOutOfStock = await getOutOfStockRecentSellers();
+    const page = buildOosPage(allOutOfStock);
+    await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
+  }
+  return { restock: restock.length, outOfStock: urgentOutOfStock.length };
 }
 
 async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {

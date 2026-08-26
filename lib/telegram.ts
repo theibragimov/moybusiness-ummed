@@ -37,9 +37,14 @@ function chunkByLines(text: string, max: number): string[] {
 /** Reply-keyboard button labels for the bot's persistent menu. */
 export const OUT_OF_STOCK_BUTTON_LABEL = "🚫 Tugagan, lekin sotilayotgan mahsulotlar";
 export const STOCK_MONEY_BUTTON_LABEL = "💰 Ombor puli";
+export const LOW_MARGIN_PRODUCTS_BUTTON_LABEL = "📉 Past marjali mahsulotlar";
 
 export const MAIN_KEYBOARD: ReplyKeyboard = {
-  keyboard: [[{ text: OUT_OF_STOCK_BUTTON_LABEL }], [{ text: STOCK_MONEY_BUTTON_LABEL }]],
+  keyboard: [
+    [{ text: OUT_OF_STOCK_BUTTON_LABEL }],
+    [{ text: STOCK_MONEY_BUTTON_LABEL }],
+    [{ text: LOW_MARGIN_PRODUCTS_BUTTON_LABEL }],
+  ],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -95,6 +100,31 @@ export async function sendTelegramMessage(text: string, opts: SendOptions = {}):
     // chunk would just resend the same keyboard redundantly.
     await sendOne(chunks[i], i === chunks.length - 1 ? opts : { chatId: opts.chatId });
   }
+}
+
+/**
+ * Edits an existing message in place — used for "Keyingisi ➡️" pagination, so
+ * paging through a list replaces the same message instead of piling up new ones.
+ * Silently no-ops on failure (e.g. the message is too old to edit, or was deleted).
+ */
+export async function editTelegramMessage(
+  chatId: string,
+  messageId: number,
+  text: string,
+  replyMarkup?: InlineKeyboard
+): Promise<void> {
+  await fetch(`${API_BASE}/bot${token()}/editMessageText`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    }),
+  }).catch(() => undefined);
 }
 
 export function escapeHtml(s: string): string {

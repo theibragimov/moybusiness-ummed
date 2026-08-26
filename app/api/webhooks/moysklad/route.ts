@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts } from "@/lib/reports";
+import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts, getOutOfStockRecentSellers } from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { formatRestockMessage, formatLowMarginMessage, formatOutOfStockMessage } from "@/lib/alertMessages";
+import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
 import { todayYmd } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
@@ -35,31 +35,37 @@ export async function POST(req: NextRequest) {
 
   const today = todayYmd();
   try {
-    const [restock, sales, outOfStock] = await Promise.all([
+    const [restock, sales, urgentOutOfStock] = await Promise.all([
       getRestockAlerts(),
       getLowMarginSalesAlerts(0.25), // last 15 min — this fires right after the sale
       getUrgentOutOfStockAlerts(),
     ]);
 
+    // Dedup decides WHETHER to push (so the same item doesn't re-alert on every
+    // later sale today); the message itself always shows the full current list,
+    // so its "Keyingisi ➡️" pagination stays consistent with the bot buttons.
     const newRestock = restock.filter((r) => shouldAlert(`stock:${r.name}`, today));
     if (newRestock.length > 0) {
-      await sendTelegramMessage(formatRestockMessage(newRestock));
+      const page = buildRestockPage(restock);
+      await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
     }
 
     if (sales.length > 0) {
       await sendTelegramMessage(formatLowMarginMessage(sales));
     }
 
-    const newOutOfStock = outOfStock.filter((r) => shouldAlert(`oos:${r.name}`, today));
-    if (newOutOfStock.length > 0) {
-      await sendTelegramMessage(formatOutOfStockMessage(newOutOfStock));
+    const newUrgentOutOfStock = urgentOutOfStock.filter((r) => shouldAlert(`oos:${r.name}`, today));
+    if (newUrgentOutOfStock.length > 0) {
+      const allOutOfStock = await getOutOfStockRecentSellers();
+      const page = buildOosPage(allOutOfStock);
+      await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
     }
 
     return NextResponse.json({
       ok: true,
       restock: newRestock.length,
       lowMarginSales: sales.length,
-      outOfStock: newOutOfStock.length,
+      outOfStock: newUrgentOutOfStock.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
