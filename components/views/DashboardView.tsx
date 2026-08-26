@@ -103,8 +103,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card title={t.dashboard.topProducts} className="lg:col-span-1">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title={t.dashboard.topProducts}>
           <ul className="space-y-3">
             {data.topProducts.map((p, i) => (
               <li key={p.name} className="flex items-center gap-3">
@@ -126,8 +126,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
           </ul>
         </Card>
 
-        <Card title={t.dashboard.topCustomers} className="lg:col-span-2">
-          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Card title={t.dashboard.topCustomers}>
+          <ul className="space-y-3">
             {data.topCustomers.map((c, i) => (
               <li key={c.id} className="flex items-center gap-3">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-600">
