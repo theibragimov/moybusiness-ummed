@@ -71,10 +71,13 @@ const STOCK_BUCKET_KEYBOARD: InlineKeyboard = {
   ]),
 };
 
+const CRM_URL = "https://moybusiness-ummed.vercel.app/crm";
+
 const CRM_KEYBOARD: InlineKeyboard = {
   inline_keyboard: [
     [{ text: "🕐 30 kun to'lov qilmagan qarzdorlar", callback_data: encodePageCallback("debtor30", "-", 0) }],
     [{ text: "💤 3 oy to'lov ham, xarid ham yo'q", callback_data: encodePageCallback("debtor3mo", "-", 0) }],
+    [{ text: "📊 Mijozlar bo'yicha to'liq tahlil", url: CRM_URL }],
   ],
 };
 
