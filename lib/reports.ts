@@ -1429,7 +1429,7 @@ async function getWarehouseDataImpl(): Promise<WarehouseData> {
  * 15 days AND current stock is less than that 15-day quantity — i.e. at the
  * recent pace, stock won't last another 15 days.
  */
-const ALERT_QTY15_MIN = 3;
+const ALERT_QTY15_MIN = 10;
 
 export interface RestockAlertRow {
   name: string;
