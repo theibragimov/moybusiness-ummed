@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { LayoutGrid, BarChart3, Wallet, Users, Building2, Boxes } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
@@ -23,9 +24,7 @@ export function TopNav() {
   return (
     <header className="flex flex-wrap items-center gap-3 rounded-3xl bg-white px-4 py-3 shadow-card sm:px-6">
       <Link href="/" className="flex items-center gap-2 pr-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-soft">
-          U
-        </div>
+        <Image src="/logo.png" alt="Ummed" width={36} height={36} className="h-9 w-9 rounded-2xl shadow-soft" priority />
         <span className="hidden text-lg font-bold tracking-tight text-ink-900 sm:inline">
           UMMED <span className="text-brand-500">Analytics</span>
         </span>

@@ -45,6 +45,7 @@ interface TelegramUpdate {
   message?: {
     chat: { id: number };
     text?: string;
+    from?: { first_name?: string; last_name?: string; username?: string };
   };
   callback_query?: {
     id: string;
@@ -157,6 +158,12 @@ export async function POST(req: NextRequest) {
     } else if (update?.message?.text === "/start" && update.message.chat.id !== undefined) {
       // Not on the allowed list yet: hand back the chat id (harmless — no business
       // data) so the owner can add it to TELEGRAM_CHAT_IDS without digging through logs.
+      const from = update.message.from;
+      const name = [from?.first_name, from?.last_name].filter(Boolean).join(" ") || "noma'lum";
+      // eslint-disable-next-line no-console
+      console.log(
+        `[telegram] unauthorized /start — chatId=${update.message.chat.id} name="${name}" username=${from?.username ?? "-"}`
+      );
       await sendTelegramMessage(
         `Sizning chat ID'ingiz: <code>${update.message.chat.id}</code>\n\nBuni administratorga yuboring — u sizni ro'yxatga qo'shgach, botdan foydalana olasiz.`,
         { chatId: String(update.message.chat.id) }
