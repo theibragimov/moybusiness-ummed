@@ -1461,32 +1461,6 @@ export async function getRestockAlerts(): Promise<RestockAlertRow[]> {
     .sort((a, b) => a.stock - b.stock);
 }
 
-/** "Selling well" floor: at least this many units sold in the last 30 days. */
-const ALERT_MIN_QTY30 = 5;
-
-export interface WellSellingLowStockRow {
-  name: string;
-  stock: number;
-  avgDailySales: number;
-  daysOfStockLeft: number | null;
-  reorderPoint: number;
-}
-
-/** Products that move well but have fallen to (or below) their reorder point — candidates for a restock alert. */
-export async function getWellSellingLowStockAlerts(): Promise<WellSellingLowStockRow[]> {
-  const { rows } = await getWarehouseData();
-  return rows
-    .filter((r) => r.status === "normal" && r.qty30 >= ALERT_MIN_QTY30 && r.stock <= r.reorderPoint)
-    .sort((a, b) => (a.daysOfStockLeft ?? 0) - (b.daysOfStockLeft ?? 0))
-    .map((r) => ({
-      name: r.name,
-      stock: r.stock,
-      avgDailySales: r.avgDailySales,
-      daysOfStockLeft: r.daysOfStockLeft,
-      reorderPoint: r.reorderPoint,
-    }));
-}
-
 /** Below this margin (as a fraction, e.g. 0.10 = 10%) a sold line item is flagged. */
 const LOW_MARGIN_THRESHOLD = 0.1;
 

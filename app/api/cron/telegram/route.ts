@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWellSellingLowStockAlerts, getLowMarginSalesAlerts } from "@/lib/reports";
-import { sendTelegramMessage, escapeHtml } from "@/lib/telegram";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { getRestockAlerts, getLowMarginSalesAlerts } from "@/lib/reports";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { formatRestockMessage, formatLowMarginMessage } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
 
@@ -23,30 +23,16 @@ function authorized(req: NextRequest): boolean {
 }
 
 async function runStockCheck(): Promise<{ sent: boolean; count: number }> {
-  const rows = await getWellSellingLowStockAlerts();
+  const rows = await getRestockAlerts();
   if (rows.length === 0) return { sent: false, count: 0 };
-
-  const lines = rows.slice(0, 30).map((r) => {
-    const days = r.daysOfStockLeft !== null ? `${Math.max(0, Math.round(r.daysOfStockLeft))} kunlik zaxira` : "zaxira tugagan";
-    return `• <b>${escapeHtml(r.name)}</b> — qoldiq: ${formatNumber(r.stock)} dona, kuniga ~${r.avgDailySales.toFixed(1)} dona sotilmoqda, ${days}`;
-  });
-  const text = `⚠️ <b>Yaxshi sotilayotgan, lekin tugab qolayotgan mahsulotlar</b>\n\n${lines.join("\n")}`;
-  await sendTelegramMessage(text);
+  await sendTelegramMessage(formatRestockMessage(rows));
   return { sent: true, count: rows.length };
 }
 
 async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {
   const sales = await getLowMarginSalesAlerts(MARGIN_LOOKBACK_HOURS);
   if (sales.length === 0) return { sent: false, count: 0 };
-
-  const lines = sales.flatMap((s) =>
-    s.items.map(
-      (i) =>
-        `• <b>${escapeHtml(i.name)}</b> — marja ${(i.margin * 100).toFixed(1)}% (${formatMoney(i.sum)} so'm), chek: ${escapeHtml(s.demandName)}${s.agent ? `, ${escapeHtml(s.agent)}` : ""}`
-    )
-  );
-  const text = `🔻 <b>Past marjali sotuvlar (≤10%)</b>\n\n${lines.join("\n")}`;
-  await sendTelegramMessage(text);
+  await sendTelegramMessage(formatLowMarginMessage(sales));
   return { sent: true, count: sales.length };
 }
 

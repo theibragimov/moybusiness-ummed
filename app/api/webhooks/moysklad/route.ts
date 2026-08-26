@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRestockAlerts, getLowMarginSalesAlerts } from "@/lib/reports";
-import { sendTelegramMessage, escapeHtml } from "@/lib/telegram";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { formatRestockMessage, formatLowMarginMessage } from "@/lib/alertMessages";
 import { todayYmd } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
@@ -42,23 +42,11 @@ export async function POST(req: NextRequest) {
 
     const newRestock = restock.filter((r) => shouldAlert(`stock:${r.name}`, today));
     if (newRestock.length > 0) {
-      const lines = newRestock
-        .slice(0, 20)
-        .map(
-          (r) =>
-            `• <b>${escapeHtml(r.name)}</b> — qoldiq: ${formatNumber(r.stock)} dona, oxirgi 15 kunda ${formatNumber(r.qty15)} dona sotilgan`
-        );
-      await sendTelegramMessage(`⚠️ <b>Tugab qolayotgan, yaxshi sotiladigan mahsulot</b>\n\n${lines.join("\n")}`);
+      await sendTelegramMessage(formatRestockMessage(newRestock));
     }
 
     if (sales.length > 0) {
-      const lines = sales.flatMap((s) =>
-        s.items.map(
-          (i) =>
-            `• <b>${escapeHtml(i.name)}</b> — marja ${(i.margin * 100).toFixed(1)}% (${formatMoney(i.sum)} so'm), chek: ${escapeHtml(s.demandName)}${s.agent ? `, ${escapeHtml(s.agent)}` : ""}`
-        )
-      );
-      await sendTelegramMessage(`🔻 <b>Past marjali sotuv</b>\n\n${lines.join("\n")}`);
+      await sendTelegramMessage(formatLowMarginMessage(sales));
     }
 
     return NextResponse.json({ ok: true, restock: newRestock.length, lowMarginSales: sales.length });
