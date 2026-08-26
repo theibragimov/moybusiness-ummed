@@ -14,7 +14,7 @@ import {
   sendTelegramMessage,
   editTelegramMessage,
   answerCallbackQuery,
-  sendTypingAction,
+  sendPlaceholder,
   isAllowedTelegramChat,
   OUT_OF_STOCK_BUTTON_LABEL,
   STOCK_MONEY_BUTTON_LABEL,
@@ -75,6 +75,16 @@ const CRM_KEYBOARD: InlineKeyboard = {
   ],
 };
 
+/** Replaces the "⏳ Yuklanmoqda…" placeholder with the real result once it's ready. */
+async function deliver(chatId: number, placeholderId: number | null, text: string, keyboard?: InlineKeyboard) {
+  if (placeholderId !== null) {
+    await editTelegramMessage(String(chatId), placeholderId, text, keyboard);
+  } else {
+    // Placeholder send failed for some reason — still deliver the result.
+    await sendTelegramMessage(text, { chatId: String(chatId), replyMarkup: keyboard });
+  }
+}
+
 async function handleMessage(chatId: number, text: string) {
   if (text === "/start") {
     await sendTelegramMessage("Salom! Quyidagi tugmalar orqali ombor holatini tekshirishingiz mumkin.", {
@@ -82,22 +92,19 @@ async function handleMessage(chatId: number, text: string) {
       replyMarkup: MAIN_KEYBOARD,
     });
   } else if (text === OUT_OF_STOCK_BUTTON_LABEL) {
-    await sendTypingAction(String(chatId));
+    const placeholderId = await sendPlaceholder(String(chatId));
     const rows = await getOutOfStockRecentSellers();
     const page = buildOosPage(rows);
-    await sendTelegramMessage(page.text, { chatId: String(chatId), replyMarkup: page.keyboard ?? MAIN_KEYBOARD });
+    await deliver(chatId, placeholderId, page.text, page.keyboard);
   } else if (text === LOW_MARGIN_PRODUCTS_BUTTON_LABEL) {
-    await sendTypingAction(String(chatId));
+    const placeholderId = await sendPlaceholder(String(chatId));
     const rows = await getLowMarginProducts();
     const page = buildLowMarginProductsPage(rows);
-    await sendTelegramMessage(page.text, { chatId: String(chatId), replyMarkup: page.keyboard ?? MAIN_KEYBOARD });
+    await deliver(chatId, placeholderId, page.text, page.keyboard);
   } else if (text === STOCK_MONEY_BUTTON_LABEL) {
-    await sendTypingAction(String(chatId));
+    const placeholderId = await sendPlaceholder(String(chatId));
     const data = await getStockMoneyData();
-    await sendTelegramMessage(formatStockMoneyMessage(data), {
-      chatId: String(chatId),
-      replyMarkup: STOCK_BUCKET_KEYBOARD,
-    });
+    await deliver(chatId, placeholderId, formatStockMoneyMessage(data), STOCK_BUCKET_KEYBOARD);
   } else if (text === CRM_BUTTON_LABEL) {
     await sendTelegramMessage("👥 <b>CRM</b>\n\nQaysi qarzdorlar ro'yxatini ko'rmoqchisiz?", {
       chatId: String(chatId),
@@ -130,16 +137,13 @@ async function fetchPage(kind: string, param: string, offset: number): Promise<P
 }
 
 async function handleCallbackQuery(callbackQueryId: string, chatId: number, messageId: number, data: string) {
-  const parsed = parsePageCallback(data);
-  if (!parsed) {
-    await answerCallbackQuery(callbackQueryId);
-    return;
-  }
-  // Deliberately NOT acknowledged yet: Telegram keeps a small loading spinner on
-  // the pressed button until answerCallbackQuery is called, which is exactly the
-  // "please wait" cue while the slow MoySklad fetch below is in flight.
-  const page = await fetchPage(parsed.kind, parsed.param, parsed.offset);
   await answerCallbackQuery(callbackQueryId);
+  const parsed = parsePageCallback(data);
+  if (!parsed) return;
+  // Explicit "please wait" edit — Telegram's own button spinner clears after a
+  // few seconds on slow requests, so it isn't a reliable indicator by itself.
+  await editTelegramMessage(String(chatId), messageId, "⏳ Yuklanmoqda…");
+  const page = await fetchPage(parsed.kind, parsed.param, parsed.offset);
   if (!page) return;
   // "Keyingisi ➡️" replaces the same message in place instead of piling up new ones.
   await editTelegramMessage(String(chatId), messageId, page.text, page.keyboard);

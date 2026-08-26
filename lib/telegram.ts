@@ -121,13 +121,22 @@ export async function answerCallbackQuery(callbackQueryId: string): Promise<void
   }).catch(() => undefined);
 }
 
-/** Shows the "typing…" indicator in a chat — call before a slow reply-keyboard-triggered fetch. */
-export async function sendTypingAction(chatId: string): Promise<void> {
-  await fetch(`${API_BASE}/bot${token()}/sendChatAction`, {
+/**
+ * Sends a short placeholder message ("⏳ Yuklanmoqda…") and returns its message_id
+ * so the caller can edit it in place once the real content is ready. Telegram's
+ * own "typing…" indicator and callback-query spinner both auto-clear after a few
+ * seconds on slow requests, so an explicit message is the only reliable "please
+ * wait" cue for anything that might take more than a couple of seconds.
+ */
+export async function sendPlaceholder(chatId: string, text = "⏳ Yuklanmoqda…"): Promise<number | null> {
+  const res = await fetch(`${API_BASE}/bot${token()}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-  }).catch(() => undefined);
+    body: JSON.stringify({ chat_id: chatId, text }),
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  const json = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
+  return json?.result?.message_id ?? null;
 }
 
 /**
