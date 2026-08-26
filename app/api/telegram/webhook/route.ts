@@ -54,6 +54,16 @@ function authorized(req: NextRequest): boolean {
   return req.headers.get("x-telegram-bot-api-secret-token") === secret;
 }
 
+/**
+ * The secret token above only proves a request really came from Telegram — it says
+ * nothing about WHICH chat sent it. Without this check, anyone who finds the bot
+ * and presses /start gets full read access to stock, margin, and debtor data.
+ */
+function isAllowedChat(chatId: number): boolean {
+  const allowed = process.env.TELEGRAM_CHAT_ID;
+  return !!allowed && String(chatId) === allowed;
+}
+
 const STOCK_BUCKETS: StockValueBucket[] = ["fast", "normal", "slow", "dead"];
 
 const STOCK_BUCKET_KEYBOARD: InlineKeyboard = {
@@ -138,11 +148,18 @@ export async function POST(req: NextRequest) {
   const update = (await req.json().catch(() => null)) as TelegramUpdate | null;
 
   try {
-    if (update?.message?.text && update.message.chat.id !== undefined) {
+    if (update?.message?.text && update.message.chat.id !== undefined && isAllowedChat(update.message.chat.id)) {
       await handleMessage(update.message.chat.id, update.message.text);
-    } else if (update?.callback_query?.data && update.callback_query.message) {
+    } else if (
+      update?.callback_query?.data &&
+      update.callback_query.message &&
+      isAllowedChat(update.callback_query.message.chat.id)
+    ) {
       const { chat, message_id } = update.callback_query.message;
       await handleCallbackQuery(update.callback_query.id, chat.id, message_id, update.callback_query.data);
+    } else if (update?.callback_query) {
+      // Still ack unauthorized button presses so the pressing user's client doesn't spin.
+      await answerCallbackQuery(update.callback_query.id);
     }
   } catch {
     // Swallow errors here — Telegram retries a non-200 response, and a transient

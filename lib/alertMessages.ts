@@ -55,10 +55,15 @@ function buildPage<T>(
   const rangeEnd = offset + slice.length;
   const rangeLabel = rows.length > PAGE_SIZE ? ` (${offset + 1}-${rangeEnd} / ${rows.length})` : "";
   const text = `${header}${rangeLabel}\n\n${entries.join("\n\n")}`;
-  const hasMore = rangeEnd < rows.length;
-  const keyboard: InlineKeyboard | undefined = hasMore
-    ? { inline_keyboard: [[{ text: "Keyingisi ➡️", callback_data: encodePageCallback(kind, param, rangeEnd) }]] }
-    : undefined;
+
+  const buttons: { text: string; callback_data: string }[] = [];
+  if (offset > 0) {
+    buttons.push({ text: "⬅️ Orqaga", callback_data: encodePageCallback(kind, param, Math.max(0, offset - PAGE_SIZE)) });
+  }
+  if (rangeEnd < rows.length) {
+    buttons.push({ text: "Keyingisi ➡️", callback_data: encodePageCallback(kind, param, rangeEnd) });
+  }
+  const keyboard: InlineKeyboard | undefined = buttons.length > 0 ? { inline_keyboard: [buttons] } : undefined;
   return { text, keyboard };
 }
 
