@@ -107,12 +107,26 @@ async function sendOne(text: string, targetChatId: string, replyMarkup?: ReplyKe
   }
 }
 
-/** Acknowledges a button press so Telegram stops showing a loading spinner on it. */
+/**
+ * Acknowledges a button press. Telegram shows a small loading spinner on the
+ * pressed button for as long as this hasn't been called yet — so call it AFTER
+ * the slow data fetch, right before showing the result, not before, or the
+ * spinner disappears immediately and the button looks unresponsive while it waits.
+ */
 export async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
   await fetch(`${API_BASE}/bot${token()}/answerCallbackQuery`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ callback_query_id: callbackQueryId }),
+  }).catch(() => undefined);
+}
+
+/** Shows the "typing…" indicator in a chat — call before a slow reply-keyboard-triggered fetch. */
+export async function sendTypingAction(chatId: string): Promise<void> {
+  await fetch(`${API_BASE}/bot${token()}/sendChatAction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, action: "typing" }),
   }).catch(() => undefined);
 }
 
