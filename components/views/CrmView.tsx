@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, ChevronUp, ChevronDown, Users, Truck, IdCard, UserX } from "lucide-react";
+import { Search, ChevronUp, ChevronDown, Users, Truck, IdCard, UserX, UserCheck } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { Card } from "@/components/Card";
@@ -396,6 +396,7 @@ export function CrmView({
   to,
   today,
   oneMonthAgo,
+  threeMonthsAgo,
 }: {
   rows: CounterpartyRow[];
   abc: CustomerAbcData;
@@ -403,6 +404,7 @@ export function CrmView({
   to: string;
   today: string;
   oneMonthAgo: string;
+  threeMonthsAgo: string;
 }) {
   const { t, locale } = useLanguage();
   const [tab, setTab] = useState<Tab>("customers");
@@ -414,6 +416,10 @@ export function CrmView({
   const inactiveCount = useMemo(
     () => customers.filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) < oneMonthAgo).length,
     [customers, oneMonthAgo]
+  );
+  const activeCount = useMemo(
+    () => customers.filter((c) => c.lastDemandDate && c.lastDemandDate.slice(0, 10) >= threeMonthsAgo).length,
+    [customers, threeMonthsAgo]
   );
 
   const tabs: { key: Tab; label: string }[] = [
@@ -435,6 +441,7 @@ export function CrmView({
         <StatCard icon={Users} label={t.crm.totalCustomers} value={formatNumber(customers.length, locale)} accent="brand" />
         <StatCard icon={Truck} label={t.crm.totalSuppliers} value={formatNumber(suppliers.length, locale)} accent="amber" />
         <StatCard icon={IdCard} label={t.crm.totalEmployees} value={formatNumber(employees.length, locale)} accent="emerald" />
+        <StatCard icon={UserCheck} label={t.crm.totalActive} value={formatNumber(activeCount, locale)} accent="emerald" />
         <StatCard icon={UserX} label={t.crm.totalInactive} value={formatNumber(inactiveCount, locale)} accent="rose" />
       </div>
 
