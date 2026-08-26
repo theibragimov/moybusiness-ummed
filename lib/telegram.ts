@@ -61,6 +61,7 @@ export const OUT_OF_STOCK_BUTTON_LABEL = "🚫 Tugagan, lekin sotilayotgan mahsu
 export const STOCK_MONEY_BUTTON_LABEL = "💰 Ombor puli";
 export const LOW_MARGIN_PRODUCTS_BUTTON_LABEL = "📉 Past marjali mahsulotlar";
 export const CRM_BUTTON_LABEL = "👥 CRM";
+export const PRODUCT_ANALYSIS_BUTTON_LABEL = "📊 Mahsulotlar bo'yicha tahlil";
 
 export const MAIN_KEYBOARD: ReplyKeyboard = {
   keyboard: [
@@ -68,19 +69,18 @@ export const MAIN_KEYBOARD: ReplyKeyboard = {
     [{ text: STOCK_MONEY_BUTTON_LABEL }],
     [{ text: LOW_MARGIN_PRODUCTS_BUTTON_LABEL }],
     [{ text: CRM_BUTTON_LABEL }],
+    [{ text: PRODUCT_ANALYSIS_BUTTON_LABEL }],
   ],
   resize_keyboard: true,
-  is_persistent: true,
 };
 
 export interface ReplyKeyboard {
   keyboard: { text: string }[][];
   resize_keyboard?: boolean;
-  is_persistent?: boolean;
 }
 
 export interface InlineKeyboard {
-  inline_keyboard: { text: string; callback_data: string }[][];
+  inline_keyboard: ({ text: string; callback_data: string } | { text: string; url: string })[][];
 }
 
 interface SendOptions {
