@@ -138,7 +138,7 @@ export interface DashboardData {
   cashBalance: number;
   salesByDay: { day: string; sum: number; count: number }[];
   topProducts: { name: string; qty: number; sum: number }[];
-  recentShipments: { id: string; name: string; moment: string; sum: number; agent: string }[];
+  topCustomers: { id: string; name: string; sum: number; count: number }[];
   expensesByCategory: { category: string; sum: number }[];
   // P&L
   monthCostSum: number;
@@ -279,7 +279,7 @@ export function getDashboardData(todayYmd: string, monthStartYmd: string): Promi
 }
 
 async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
-  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, recentDemandsExpanded, monthlyPL] =
+  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, counterpartyMeta, monthlyPL] =
     await Promise.all([
       listDemands(monthStartYmd, todayYmd),
       listCashOutflows(monthStartYmd, todayYmd),
@@ -288,13 +288,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
         momentTo: momentTo(todayYmd),
       }).catch(() => ({ money: { balance: 0 } })),
       getExpenseItemNames(),
-      // small dedicated page so `expand` (capped at ~100 rows by MoySklad) still resolves
-      msGet<MsListResponse<DemandRow>>("entity/demand", {
-        filter: dateRangeFilter(monthStartYmd, todayYmd),
-        order: "moment,desc",
-        limit: 8,
-        expand: "agent",
-      }).catch(() => ({ rows: [] as DemandRow[] })),
+      getCounterpartyMeta(),
       getMonthlyPL(12),
     ]);
 
@@ -322,9 +316,29 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
     productMap.set(r.assortment.name, { qty: r.sellQuantity, sum: r.sellSum });
   }
   const topProducts = [...productMap.entries()]
-    .sort((a, b) => b[1].qty - a[1].qty)
+    .sort((a, b) => b[1].sum - a[1].sum)
     .slice(0, 6)
     .map(([name, v]) => ({ name, ...v }));
+
+  // Top revenue-bringing customers this month — excludes suppliers/employees,
+  // same restriction as the CRM ABC analysis (a "customer" ranking shouldn't
+  // include money paid to/through the business's own staff or vendors).
+  const customerAgg = new Map<string, { sum: number; count: number }>();
+  for (const d of monthDemands) {
+    const href = d.agent?.meta.href;
+    if (!href) continue;
+    const id = idFromHref(href);
+    const seg = counterpartyMeta.get(id)?.segment;
+    if (seg === "supplier" || seg === "employee") continue;
+    const cur = customerAgg.get(id) ?? { sum: 0, count: 0 };
+    cur.sum += d.sum;
+    cur.count += 1;
+    customerAgg.set(id, cur);
+  }
+  const topCustomers = [...customerAgg.entries()]
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .slice(0, 6)
+    .map(([id, v]) => ({ id, name: counterpartyMeta.get(id)?.name ?? id, ...v }));
 
   const expenseMap = new Map<string, number>();
   let monthExpensesSum = 0;
@@ -344,14 +358,6 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
   const expensesByCategory = [...expenseMap.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([category, sum]) => ({ category, sum }));
-
-  const recentShipments = recentDemandsExpanded.rows.map((d) => ({
-    id: d.id,
-    name: d.name,
-    moment: d.moment,
-    sum: d.sum,
-    agent: d.agent?.name ?? "",
-  }));
 
   // P&L: derived from the profit-by-product report so revenue/cost/profit stay
   // internally consistent (report/dashboard/money's own figures can diverge slightly).
@@ -378,7 +384,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
     netMargin,
     salesByDay,
     topProducts,
-    recentShipments,
+    topCustomers,
     expensesByCategory,
     monthlyPL,
   };

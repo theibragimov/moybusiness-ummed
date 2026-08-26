@@ -126,32 +126,26 @@ export function DashboardView({ data }: { data: DashboardData }) {
           </ul>
         </Card>
 
-        <Card title={t.dashboard.recentShipments} className="lg:col-span-2">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
-                  <th className="pb-2 font-medium">{t.dashboard.colDoc}</th>
-                  <th className="pb-2 font-medium">{t.dashboard.colCounterparty}</th>
-                  <th className="pb-2 font-medium">{t.dashboard.colDate}</th>
-                  <th className="pb-2 text-right font-medium">{t.dashboard.colAmount}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface">
-                {data.recentShipments.map((s) => (
-                  <tr key={s.id}>
-                    <td className="py-2.5 font-medium text-ink-900">{s.name}</td>
-                    <td className="py-2.5 max-w-[220px] truncate text-ink-500">{s.agent}</td>
-                    <td className="py-2.5 text-ink-500">{s.moment.slice(0, 16)}</td>
-                    <td className="py-2.5 text-right font-semibold text-ink-900">{money(s.sum)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {data.recentShipments.length === 0 && (
-              <p className="py-6 text-center text-sm text-ink-400">{t.common.noData}</p>
-            )}
-          </div>
+        <Card title={t.dashboard.topCustomers} className="lg:col-span-2">
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {data.topCustomers.map((c, i) => (
+              <li key={c.id} className="flex items-center gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-600">
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-ink-900">{c.name}</p>
+                  <p className="text-xs text-ink-400">
+                    {formatNumber(c.count, locale)} {t.dashboard.documents}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-ink-700">{money(c.sum)}</span>
+              </li>
+            ))}
+          </ul>
+          {data.topCustomers.length === 0 && (
+            <p className="py-6 text-center text-sm text-ink-400">{t.common.noData}</p>
+          )}
         </Card>
       </div>
     </div>
