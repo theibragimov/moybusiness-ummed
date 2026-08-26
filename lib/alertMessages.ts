@@ -54,7 +54,9 @@ function buildPage<T>(
   const entries = slice.map((r, i) => formatItem(r, offset + i + 1));
   const rangeEnd = offset + slice.length;
   const rangeLabel = rows.length > PAGE_SIZE ? ` (${offset + 1}-${rangeEnd} / ${rows.length})` : "";
-  const text = `${header}${rangeLabel}\n\n${entries.join("\n\n")}`;
+  const remaining = rows.length - rangeEnd;
+  const footer = remaining > 0 ? `\n\n📄 Yana ${remaining} ta bor.` : "\n\n✅ Ro'yxat tugadi.";
+  const text = `${header}${rangeLabel}\n\n${entries.join("\n\n")}${footer}`;
 
   const buttons: { text: string; callback_data: string }[] = [];
   if (offset > 0) {
