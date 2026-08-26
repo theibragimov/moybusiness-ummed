@@ -1,6 +1,6 @@
 import "server-only";
 import { buildFilter, entityHref, fetchAllRows, msGet, type MsListResponse } from "./moysklad";
-import { dayOf, momentFrom, momentTo, lastMonths, todayYmd, daysAgoYmd } from "./tashkent";
+import { dayOf, momentFrom, momentTo, lastMonths, todayYmd, daysAgoYmd, hoursAgoMoment } from "./tashkent";
 import { cached } from "./cache";
 
 // ---------- shared types ----------
@@ -1420,4 +1420,129 @@ async function getWarehouseDataImpl(): Promise<WarehouseData> {
   });
 
   return { rows, summary, leadTimeDays: WAREHOUSE_LEAD_TIME_DAYS };
+}
+
+// ---------- telegram alerts ----------
+
+/**
+ * A product needs restocking when it sold at least this many units in the last
+ * 15 days AND current stock is less than that 15-day quantity — i.e. at the
+ * recent pace, stock won't last another 15 days.
+ */
+const ALERT_QTY15_MIN = 3;
+
+export interface RestockAlertRow {
+  name: string;
+  stock: number;
+  qty15: number;
+}
+
+/** Well-selling products whose stock has fallen below their own last-15-days sales pace. */
+export async function getRestockAlerts(): Promise<RestockAlertRow[]> {
+  const today = todayYmd();
+  const from15 = daysAgoYmd(14);
+  const [stockRows, rows15] = await Promise.all([
+    getStockSnapshot(),
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(from15),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
+
+  const qty15ByName = new Map<string, number>();
+  for (const r of rows15) {
+    if (r.sellQuantity <= 0) continue;
+    qty15ByName.set(r.assortment.name, (qty15ByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+
+  return stockRows
+    .map((r) => ({ name: r.name, stock: r.stock, qty15: qty15ByName.get(r.name) ?? 0 }))
+    .filter((r) => r.qty15 >= ALERT_QTY15_MIN && r.stock < r.qty15)
+    .sort((a, b) => a.stock - b.stock);
+}
+
+/** "Selling well" floor: at least this many units sold in the last 30 days. */
+const ALERT_MIN_QTY30 = 5;
+
+export interface WellSellingLowStockRow {
+  name: string;
+  stock: number;
+  avgDailySales: number;
+  daysOfStockLeft: number | null;
+  reorderPoint: number;
+}
+
+/** Products that move well but have fallen to (or below) their reorder point — candidates for a restock alert. */
+export async function getWellSellingLowStockAlerts(): Promise<WellSellingLowStockRow[]> {
+  const { rows } = await getWarehouseData();
+  return rows
+    .filter((r) => r.status === "normal" && r.qty30 >= ALERT_MIN_QTY30 && r.stock <= r.reorderPoint)
+    .sort((a, b) => (a.daysOfStockLeft ?? 0) - (b.daysOfStockLeft ?? 0))
+    .map((r) => ({
+      name: r.name,
+      stock: r.stock,
+      avgDailySales: r.avgDailySales,
+      daysOfStockLeft: r.daysOfStockLeft,
+      reorderPoint: r.reorderPoint,
+    }));
+}
+
+/** Below this margin (as a fraction, e.g. 0.10 = 10%) a sold line item is flagged. */
+const LOW_MARGIN_THRESHOLD = 0.1;
+
+export interface LowMarginItem {
+  name: string;
+  margin: number;
+  sum: number;
+}
+
+export interface LowMarginSaleRow {
+  demandId: string;
+  demandName: string;
+  moment: string;
+  agent: string;
+  items: LowMarginItem[];
+}
+
+interface DemandPositionRow {
+  id: string;
+  quantity: number;
+  price: number;
+  assortment: { name: string; buyPrice?: { value: number } };
+}
+
+/**
+ * MoySklad has no per-sale profit report (only aggregates by product/variant), so
+ * margin here is computed line-by-line from each position's sale price against the
+ * assortment's current purchase price — a live approximation, not the FIFO-costed
+ * margin shown elsewhere in the app.
+ */
+async function getDemandPositions(demandId: string): Promise<DemandPositionRow[]> {
+  return fetchAllRows<DemandPositionRow>(`entity/demand/${demandId}/positions`, { expand: "assortment" }, 200);
+}
+
+/** Sales in the last `sinceHours` containing at least one line item sold at ≤10% margin. */
+export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMarginSaleRow[]> {
+  const demands = await fetchAllRows<DemandRow>(
+    "entity/demand",
+    { filter: buildFilter([`moment>=${hoursAgoMoment(sinceHours)}`]), expand: "agent" },
+    500
+  );
+
+  const results: LowMarginSaleRow[] = [];
+  for (const d of demands) {
+    const positions = await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]);
+    const items: LowMarginItem[] = positions
+      .filter((p) => p.price > 0 && p.assortment?.buyPrice)
+      .map((p) => ({
+        name: p.assortment.name,
+        margin: (p.price - p.assortment.buyPrice!.value) / p.price,
+        sum: p.price * p.quantity,
+      }))
+      .filter((p) => p.margin <= LOW_MARGIN_THRESHOLD);
+    if (items.length > 0) {
+      results.push({ demandId: d.id, demandName: d.name, moment: d.moment, agent: d.agent?.name ?? "", items });
+    }
+  }
+  return results;
 }

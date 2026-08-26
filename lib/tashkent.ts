@@ -51,6 +51,23 @@ export function dayOf(moment: string): string {
   return moment.slice(0, 10);
 }
 
+/** MoySklad moment string ("YYYY-MM-DD HH:mm:ss") for `hours` hours before now, in Tashkent time. */
+export function hoursAgoMoment(hours: number): string {
+  const d = new Date(Date.now() - hours * 60 * 60 * 1000);
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(d).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
 /**
  * The last `count` calendar months up to and including the current one, oldest first.
  * Each entry gives the month's label ("YYYY-MM") and its first/last day as YYYY-MM-DD.
