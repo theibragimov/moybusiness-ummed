@@ -1461,6 +1461,39 @@ export async function getRestockAlerts(): Promise<RestockAlertRow[]> {
     .sort((a, b) => a.stock - b.stock);
 }
 
+const OUT_OF_STOCK_LOOKBACK_DAYS = 10;
+
+export interface OutOfStockRecentSellerRow {
+  name: string;
+  stock: number;
+  qty10: number;
+}
+
+/** Products at zero (or negative) stock that still sold within the last 10 days — on-demand, via the bot's button. */
+export async function getOutOfStockRecentSellers(): Promise<OutOfStockRecentSellerRow[]> {
+  const today = todayYmd();
+  const from10 = daysAgoYmd(OUT_OF_STOCK_LOOKBACK_DAYS - 1);
+  const [stockRows, rows10] = await Promise.all([
+    getStockSnapshot(),
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(from10),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
+
+  const qty10ByName = new Map<string, number>();
+  for (const r of rows10) {
+    if (r.sellQuantity <= 0) continue;
+    qty10ByName.set(r.assortment.name, (qty10ByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+
+  return stockRows
+    .filter((r) => r.stock <= 0)
+    .map((r) => ({ name: r.name, stock: r.stock, qty10: qty10ByName.get(r.name) ?? 0 }))
+    .filter((r) => r.qty10 > 0)
+    .sort((a, b) => b.qty10 - a.qty10);
+}
+
 /** Below this margin (as a fraction, e.g. 0.10 = 10%) a sold line item is flagged. */
 const LOW_MARGIN_THRESHOLD = 0.1;
 

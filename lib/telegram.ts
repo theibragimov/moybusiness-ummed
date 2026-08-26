@@ -34,15 +34,37 @@ function chunkByLines(text: string, max: number): string[] {
   return chunks;
 }
 
-async function sendOne(text: string): Promise<void> {
+/** Reply-keyboard button label for the "out of stock but still selling" bot command. */
+export const OUT_OF_STOCK_BUTTON_LABEL = "🚫 Tugagan, lekin sotilayotgan mahsulotlar";
+
+export const MAIN_KEYBOARD: ReplyKeyboard = {
+  keyboard: [[{ text: OUT_OF_STOCK_BUTTON_LABEL }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+export interface ReplyKeyboard {
+  keyboard: { text: string }[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+}
+
+interface SendOptions {
+  /** Defaults to TELEGRAM_CHAT_ID — pass a different chat to reply to whoever triggered a bot command. */
+  chatId?: string;
+  replyMarkup?: ReplyKeyboard;
+}
+
+async function sendOne(text: string, opts: SendOptions = {}): Promise<void> {
   const res = await fetch(`${API_BASE}/bot${token()}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: chatId(),
+      chat_id: opts.chatId ?? chatId(),
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
+      ...(opts.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
     }),
   });
   if (!res.ok) {
@@ -52,9 +74,12 @@ async function sendOne(text: string): Promise<void> {
 }
 
 /** Sends a Telegram message, splitting it across multiple messages if it exceeds Telegram's length cap. */
-export async function sendTelegramMessage(text: string): Promise<void> {
-  for (const chunk of chunkByLines(text, MAX_MESSAGE_LEN)) {
-    await sendOne(chunk);
+export async function sendTelegramMessage(text: string, opts: SendOptions = {}): Promise<void> {
+  const chunks = chunkByLines(text, MAX_MESSAGE_LEN);
+  for (let i = 0; i < chunks.length; i++) {
+    // A reply keyboard only needs to be (re)attached once; repeating it on every
+    // chunk would just resend the same keyboard redundantly.
+    await sendOne(chunks[i], i === chunks.length - 1 ? opts : { chatId: opts.chatId });
   }
 }
 
