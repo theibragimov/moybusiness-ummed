@@ -5,6 +5,7 @@ import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/al
 import { todayYmd } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.MOYSKLAD_WEBHOOK_SECRET;

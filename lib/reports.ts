@@ -1673,17 +1673,23 @@ interface IncomingPaymentRow {
   agent?: MetaRef;
 }
 
-/** Last incoming-payment date (bank or cash) per counterparty, across all time. */
-function getLastPaymentDates(): Promise<Map<string, string>> {
-  return cached("last-payment-dates", getLastPaymentDatesImpl);
+/**
+ * Last incoming-payment date (bank or cash) per counterparty, within the last
+ * `windowDays`. Scoped to a window — not all-time — because paymentin/cashin
+ * are expensive to page through on this account (~5s per 1000-row page), and a
+ * debtor list only ever needs to know "did they pay within the last N days".
+ */
+function getRecentPaymentDates(windowDays: number): Promise<Map<string, string>> {
+  return cached(`recent-payment-dates:${windowDays}`, () => getRecentPaymentDatesImpl(windowDays));
 }
 
-async function getLastPaymentDatesImpl(): Promise<Map<string, string>> {
+async function getRecentPaymentDatesImpl(windowDays: number): Promise<Map<string, string>> {
+  const filter = buildFilter([`moment>=${momentFrom(daysAgoYmd(windowDays - 1))}`]);
   const [paymentins, cashins] = await Promise.all([
-    fetchAllRows<IncomingPaymentRow>("entity/paymentin", { expand: "agent" }, 20000).catch(
+    fetchAllRows<IncomingPaymentRow>("entity/paymentin", { filter, expand: "agent" }, 5000).catch(
       () => [] as IncomingPaymentRow[]
     ),
-    fetchAllRows<IncomingPaymentRow>("entity/cashin", { expand: "agent" }, 20000).catch(
+    fetchAllRows<IncomingPaymentRow>("entity/cashin", { filter, expand: "agent" }, 5000).catch(
       () => [] as IncomingPaymentRow[]
     ),
   ]);
@@ -1706,33 +1712,47 @@ export interface DebtorRow {
   lastDemandDate: string | null;
 }
 
-async function getDebtorRows(): Promise<DebtorRow[]> {
-  const [counterparties, lastPayments] = await Promise.all([getCounterparties(), getLastPaymentDates()]);
-  return counterparties
-    .filter((c) => c.segment !== "employee" && c.balance < 0) // negative balance = they owe us
+/**
+ * Customers who owe us money (negative balance = shipped more than paid — see
+ * getDebtsData above). Explicitly customer-only: suppliers/employees can also
+ * carry a balance, but a "debtor" list here means people who owe US, not the
+ * other way around.
+ */
+async function getDebtorCandidates(): Promise<CounterpartyRow[]> {
+  const counterparties = await getCounterparties();
+  return counterparties.filter((c) => c.segment === "customer" && c.balance < 0);
+}
+
+/** Debtors who haven't made a single payment in the last 30 days (or ever, going back 90 days). */
+export async function getStaleDebtors30d(): Promise<DebtorRow[]> {
+  const cutoffDays = 90;
+  const cutoff = daysAgoYmd(29);
+  const [candidates, recentPayments] = await Promise.all([getDebtorCandidates(), getRecentPaymentDates(cutoffDays)]);
+  return candidates
     .map((c) => ({
       name: c.name,
       phone: c.phone,
       balance: c.balance,
-      lastPaymentDate: lastPayments.get(c.id) ?? null,
+      lastPaymentDate: recentPayments.get(c.id) ?? null,
       lastDemandDate: c.lastDemandDate,
-    }));
-}
-
-/** Debtors who haven't made a single payment in the last 30 days. */
-export async function getStaleDebtors30d(): Promise<DebtorRow[]> {
-  const cutoff = daysAgoYmd(29);
-  const rows = await getDebtorRows();
-  return rows
+    }))
     .filter((r) => r.lastPaymentDate === null || dayOf(r.lastPaymentDate) < cutoff)
     .sort((a, b) => a.balance - b.balance); // biggest debt first (most negative)
 }
 
 /** Debtors who, on top of owing money, haven't paid *or* bought anything in the last 3 months — gone quiet entirely. */
 export async function getDormantDebtors3mo(): Promise<DebtorRow[]> {
+  const cutoffDays = 100; // a bit past 3 real calendar months, so the fetch window fully covers `cutoff` below
   const cutoff = lastMonths(3)[0].start;
-  const rows = await getDebtorRows();
-  return rows
+  const [candidates, recentPayments] = await Promise.all([getDebtorCandidates(), getRecentPaymentDates(cutoffDays)]);
+  return candidates
+    .map((c) => ({
+      name: c.name,
+      phone: c.phone,
+      balance: c.balance,
+      lastPaymentDate: recentPayments.get(c.id) ?? null,
+      lastDemandDate: c.lastDemandDate,
+    }))
     .filter((r) => r.lastPaymentDate === null || dayOf(r.lastPaymentDate) < cutoff)
     .filter((r) => r.lastDemandDate === null || dayOf(r.lastDemandDate) < cutoff)
     .sort((a, b) => a.balance - b.balance);

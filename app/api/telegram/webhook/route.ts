@@ -37,6 +37,9 @@ import {
 } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
+// The debtor lists page through MoySklad reports that are slow on this account;
+// give the function room to finish instead of Vercel cutting it off mid-fetch.
+export const maxDuration = 60;
 
 interface TelegramUpdate {
   message?: {

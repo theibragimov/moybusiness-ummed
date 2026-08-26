@@ -4,6 +4,7 @@ import { sendTelegramMessage } from "@/lib/telegram";
 import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // How far back to look for new sales on each "margin" run. Must be >= the cron
 // interval that hits ?type=margin, or a sale near a run boundary could be missed.
