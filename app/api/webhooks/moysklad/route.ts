@@ -13,15 +13,16 @@ function authorized(req: NextRequest): boolean {
   return req.nextUrl.searchParams.get("secret") === secret;
 }
 
-// Best-effort de-dup so a product already flagged today doesn't re-alert on every
-// later sale in the same warm serverless instance. Resets on cold start and isn't
-// shared across instances — occasional repeat alerts for the same item on the
-// same day are expected, not a bug.
-const alertedToday = new Map<string, string>();
+// Best-effort de-dup: at most one restock digest and one out-of-stock digest per
+// day, not one per product — otherwise a busy day's worth of sales each re-sends
+// the whole (barely-changed) list. First qualifying sale of the day triggers it;
+// later sales that day stay quiet. Resets on cold start and isn't shared across
+// instances, so an occasional repeat on the same day is possible, not a bug.
+const sentToday = new Map<string, string>();
 
 function shouldAlert(key: string, today: string): boolean {
-  if (alertedToday.get(key) === today) return false;
-  alertedToday.set(key, today);
+  if (sentToday.get(key) === today) return false;
+  sentToday.set(key, today);
   return true;
 }
 
@@ -42,11 +43,11 @@ export async function POST(req: NextRequest) {
       getUrgentOutOfStockAlerts(),
     ]);
 
-    // Dedup decides WHETHER to push (so the same item doesn't re-alert on every
-    // later sale today); the message itself always shows the full current list,
-    // so its "Keyingisi ➡️" pagination stays consistent with the bot buttons.
-    const newRestock = restock.filter((r) => shouldAlert(`stock:${r.name}`, today));
-    if (newRestock.length > 0) {
+    // One digest per day, not one per product — see shouldAlert above. The
+    // message itself always shows the full current list, so its "Keyingisi ➡️"
+    // pagination stays consistent with the bot buttons.
+    const sendRestock = restock.length > 0 && shouldAlert("restock-digest", today);
+    if (sendRestock) {
       const page = buildRestockPage(restock);
       await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
     }
@@ -55,8 +56,8 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage(formatLowMarginMessage(sales));
     }
 
-    const newUrgentOutOfStock = urgentOutOfStock.filter((r) => shouldAlert(`oos:${r.name}`, today));
-    if (newUrgentOutOfStock.length > 0) {
+    const sendOutOfStock = urgentOutOfStock.length > 0 && shouldAlert("oos-digest", today);
+    if (sendOutOfStock) {
       const allOutOfStock = await getOutOfStockRecentSellers();
       const page = buildOosPage(allOutOfStock);
       await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
@@ -64,9 +65,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      restock: newRestock.length,
+      restock: sendRestock ? restock.length : 0,
       lowMarginSales: sales.length,
-      outOfStock: newUrgentOutOfStock.length,
+      outOfStock: sendOutOfStock ? urgentOutOfStock.length : 0,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
