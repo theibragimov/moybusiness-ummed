@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getRestockAlerts,
   getLowMarginSalesAlerts,
   getUrgentOutOfStockAlerts,
   getOutOfStockRecentSellers,
   getJustSoldOutProducts,
 } from "@/lib/reports";
 import { sendTelegramMessage, escapeHtml } from "@/lib/telegram";
-import { formatLowMarginMessage, buildRestockPage, buildOosPage } from "@/lib/alertMessages";
+import { formatLowMarginMessage, buildOosPage } from "@/lib/alertMessages";
 import { formatNumber } from "@/lib/format";
 import { todayYmd } from "@/lib/tashkent";
 
@@ -20,11 +19,14 @@ function authorized(req: NextRequest): boolean {
   return req.nextUrl.searchParams.get("secret") === secret;
 }
 
-// Best-effort de-dup: at most one restock digest and one out-of-stock digest per
-// day, not one per product — otherwise a busy day's worth of sales each re-sends
-// the whole (barely-changed) list. First qualifying sale of the day triggers it;
-// later sales that day stay quiet. Resets on cold start and isn't shared across
+// Best-effort de-dup: at most one out-of-stock digest per day, not one per
+// product — otherwise a busy day's worth of sales each re-sends the whole
+// (barely-changed) list. First qualifying sale of the day triggers it; later
+// sales that day stay quiet. Resets on cold start and isn't shared across
 // instances, so an occasional repeat on the same day is possible, not a bug.
+// The restock ("⚠️ Tugab qolayotgan") check used to live here too, firing on
+// every sale — moved out entirely; it now only runs from the daily cron
+// (see app/api/cron/telegram/route.ts), so it can't send more than once a day.
 const sentToday = new Map<string, string>();
 
 function shouldAlert(key: string, today: string): boolean {
@@ -44,21 +46,11 @@ export async function POST(req: NextRequest) {
 
   const today = todayYmd();
   try {
-    const [restock, sales, urgentOutOfStock, justSoldOut] = await Promise.all([
-      getRestockAlerts(),
+    const [sales, urgentOutOfStock, justSoldOut] = await Promise.all([
       getLowMarginSalesAlerts(0.25), // last 15 min — this fires right after the sale
       getUrgentOutOfStockAlerts(),
       getJustSoldOutProducts(),
     ]);
-
-    // One digest per day, not one per product — see shouldAlert above. The
-    // message itself always shows the full current list, so its "Keyingisi ➡️"
-    // pagination stays consistent with the bot buttons.
-    const sendRestock = restock.length > 0 && shouldAlert("restock-digest", today);
-    if (sendRestock) {
-      const page = buildRestockPage(restock);
-      await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
-    }
 
     if (sales.length > 0) {
       await sendTelegramMessage(formatLowMarginMessage(sales));
@@ -84,7 +76,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      restock: sendRestock ? restock.length : 0,
       lowMarginSales: sales.length,
       outOfStock: sendOutOfStock ? urgentOutOfStock.length : 0,
       justSoldOut: newlyOut.length,
