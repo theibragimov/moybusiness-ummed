@@ -9,11 +9,13 @@ import type {
   StockMoneyData,
   StockBucketProductRow,
   StockValueBucket,
+  DebtorRow,
 } from "./reports";
+import { dayOf } from "./tashkent";
 
 export const PAGE_SIZE = 25;
 
-export type PageKind = "restock" | "oos" | "lowmargin" | "bucket";
+export type PageKind = "restock" | "oos" | "lowmargin" | "bucket" | "debtor30" | "debtor3mo";
 
 export interface Page {
   text: string;
@@ -26,7 +28,7 @@ export function encodePageCallback(kind: PageKind, param: string, offset: number
 }
 
 export function parsePageCallback(data: string): { kind: PageKind; param: string; offset: number } | null {
-  const m = /^pg:(restock|oos|lowmargin|bucket):([a-z-]+):(\d+)$/.exec(data);
+  const m = /^pg:(restock|oos|lowmargin|bucket|debtor30|debtor3mo):([a-z-]+):(\d+)$/.exec(data);
   if (!m) return null;
   return { kind: m[1] as PageKind, param: m[2], offset: Number(m[3]) };
 }
@@ -123,6 +125,27 @@ export function buildStockBucketPage(bucket: StockValueBucket, label: string, ro
     "bucket",
     bucket
   );
+}
+
+function debtorEntry(r: DebtorRow, i: number): string {
+  const paid = r.lastPaymentDate ? dayOf(r.lastPaymentDate) : "hech qachon";
+  const bought = r.lastDemandDate ? dayOf(r.lastDemandDate) : "hech qachon";
+  return (
+    `${i}. <b>${escapeHtml(r.name)}</b>${r.phone ? ` (${escapeHtml(r.phone)})` : ""}\n` +
+    `💸 Qarz: <b>${formatMoney(Math.abs(r.balance))}</b> so'm\n📅 Oxirgi to'lov: <b>${paid}</b>\n🛒 Oxirgi xarid: <b>${bought}</b>`
+  );
+}
+
+const DEBTOR_30D_HEADER = "🕐 <b>So'nggi 30 kunda to'lov qilmagan qarzdorlar</b>";
+
+export function buildDebtor30Page(rows: DebtorRow[], offset = 0): Page {
+  return buildPage(DEBTOR_30D_HEADER, "Hozircha bunday qarzdor yo'q.", rows, offset, debtorEntry, "debtor30", "-");
+}
+
+const DEBTOR_3MO_HEADER = "💤 <b>Qarzdor, 3 oydan beri to'lov ham, xarid ham yo'q</b>";
+
+export function buildDebtor3moPage(rows: DebtorRow[], offset = 0): Page {
+  return buildPage(DEBTOR_3MO_HEADER, "Hozircha bunday qarzdor yo'q.", rows, offset, debtorEntry, "debtor3mo", "-");
 }
 
 export function formatLowMarginMessage(sales: LowMarginSaleRow[], limit = 25): string {

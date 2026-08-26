@@ -5,6 +5,8 @@ import {
   getLowMarginProducts,
   getStockMoneyData,
   getStockBucketProducts,
+  getStaleDebtors30d,
+  getDormantDebtors3mo,
   STOCK_BUCKET_LABELS,
   type StockValueBucket,
 } from "@/lib/reports";
@@ -15,6 +17,7 @@ import {
   OUT_OF_STOCK_BUTTON_LABEL,
   STOCK_MONEY_BUTTON_LABEL,
   LOW_MARGIN_PRODUCTS_BUTTON_LABEL,
+  CRM_BUTTON_LABEL,
   MAIN_KEYBOARD,
   type InlineKeyboard,
 } from "@/lib/telegram";
@@ -23,6 +26,8 @@ import {
   buildRestockPage,
   buildLowMarginProductsPage,
   buildStockBucketPage,
+  buildDebtor30Page,
+  buildDebtor3moPage,
   formatStockMoneyMessage,
   encodePageCallback,
   parsePageCallback,
@@ -57,6 +62,13 @@ const STOCK_BUCKET_KEYBOARD: InlineKeyboard = {
   ]),
 };
 
+const CRM_KEYBOARD: InlineKeyboard = {
+  inline_keyboard: [
+    [{ text: "🕐 30 kun to'lov qilmagan qarzdorlar", callback_data: encodePageCallback("debtor30", "-", 0) }],
+    [{ text: "💤 3 oy to'lov ham, xarid ham yo'q", callback_data: encodePageCallback("debtor3mo", "-", 0) }],
+  ],
+};
+
 async function handleMessage(chatId: number, text: string) {
   if (text === "/start") {
     await sendTelegramMessage("Salom! Quyidagi tugmalar orqali ombor holatini tekshirishingiz mumkin.", {
@@ -77,6 +89,11 @@ async function handleMessage(chatId: number, text: string) {
       chatId: String(chatId),
       replyMarkup: STOCK_BUCKET_KEYBOARD,
     });
+  } else if (text === CRM_BUTTON_LABEL) {
+    await sendTelegramMessage("👥 <b>CRM</b>\n\nQaysi qarzdorlar ro'yxatini ko'rmoqchisiz?", {
+      chatId: String(chatId),
+      replyMarkup: CRM_KEYBOARD,
+    });
   }
 }
 
@@ -93,6 +110,12 @@ async function fetchPage(kind: string, param: string, offset: number): Promise<P
   if (kind === "bucket" && STOCK_BUCKETS.includes(param as StockValueBucket)) {
     const bucket = param as StockValueBucket;
     return buildStockBucketPage(bucket, STOCK_BUCKET_LABELS[bucket], await getStockBucketProducts(bucket), offset);
+  }
+  if (kind === "debtor30") {
+    return buildDebtor30Page(await getStaleDebtors30d(), offset);
+  }
+  if (kind === "debtor3mo") {
+    return buildDebtor3moPage(await getDormantDebtors3mo(), offset);
   }
   return null;
 }
