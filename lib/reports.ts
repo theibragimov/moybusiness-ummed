@@ -1494,13 +1494,24 @@ export async function getOutOfStockRecentSellers(): Promise<OutOfStockRecentSell
     .sort((a, b) => b.qty10 - a.qty10);
 }
 
-/** Below this margin (as a fraction, e.g. 0.10 = 10%) a sold line item is flagged. */
-const LOW_MARGIN_THRESHOLD = 0.1;
+/** Above this many units sold in the last 10 days, an out-of-stock item is urgent enough for a push alert. */
+const URGENT_OUT_OF_STOCK_QTY10_MIN = 10;
+
+/** Same as `getOutOfStockRecentSellers`, but only the fast movers worth a proactive push alert. */
+export async function getUrgentOutOfStockAlerts(): Promise<OutOfStockRecentSellerRow[]> {
+  const rows = await getOutOfStockRecentSellers();
+  return rows.filter((r) => r.qty10 > URGENT_OUT_OF_STOCK_QTY10_MIN);
+}
+
+/** Below this margin (as a fraction, e.g. 0.05 = 5%) a sold line item is flagged. */
+const LOW_MARGIN_THRESHOLD = 0.05;
 
 export interface LowMarginItem {
   name: string;
   margin: number;
   sum: number;
+  unitCost: number;
+  unitPrice: number;
 }
 
 export interface LowMarginSaleRow {
@@ -1545,6 +1556,8 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
         name: p.assortment.name,
         margin: (p.price - p.assortment.buyPrice!.value) / p.price,
         sum: p.price * p.quantity,
+        unitCost: p.assortment.buyPrice!.value,
+        unitPrice: p.price,
       }))
       .filter((p) => p.margin <= LOW_MARGIN_THRESHOLD);
     if (items.length > 0) {
@@ -1552,4 +1565,79 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
     }
   }
   return results;
+}
+
+// ---------- warehouse money (Telegram "💰 Ombor puli" button) ----------
+
+export type StockValueBucket = "fast" | "normal" | "slow" | "dead";
+
+/** Below this many days of stock left, a product is about to run out. */
+const FAST_RUNNING_OUT_DAYS = 15;
+/** 150–180 days of stock left is "selling slowly"; beyond 180 (or never sold) is effectively dead. */
+const SLOW_DAYS_MIN = 150;
+const SLOW_DAYS_MAX = 180;
+
+export const STOCK_BUCKET_LABELS: Record<StockValueBucket, string> = {
+  fast: "🔴 Tez tugayotgan",
+  normal: "🟢 Normal",
+  slow: "🟡 Sekin sotilayotgan",
+  dead: "🔴 Juda sekin / o'lik zaxira",
+};
+
+function classifyStockBucket(daysOfStockLeft: number | null): StockValueBucket {
+  if (daysOfStockLeft === null || daysOfStockLeft > SLOW_DAYS_MAX) return "dead";
+  if (daysOfStockLeft >= SLOW_DAYS_MIN) return "slow";
+  if (daysOfStockLeft < FAST_RUNNING_OUT_DAYS) return "fast";
+  return "normal";
+}
+
+export interface StockBucketSummary {
+  bucket: StockValueBucket;
+  label: string;
+  value: number;
+}
+
+export interface StockMoneyData {
+  totalValue: number;
+  buckets: StockBucketSummary[];
+}
+
+/** Current stock value (at cost*price from the stock report), split into how fast each product is moving. */
+export async function getStockMoneyData(): Promise<StockMoneyData> {
+  const { rows } = await getWarehouseData();
+  const totals = new Map<StockValueBucket, number>([
+    ["fast", 0],
+    ["normal", 0],
+    ["slow", 0],
+    ["dead", 0],
+  ]);
+  let totalValue = 0;
+  for (const r of rows) {
+    const bucket = classifyStockBucket(r.daysOfStockLeft);
+    totals.set(bucket, (totals.get(bucket) ?? 0) + r.stockValue);
+    totalValue += r.stockValue;
+  }
+  const buckets = (["fast", "normal", "slow", "dead"] as const).map((bucket) => ({
+    bucket,
+    label: STOCK_BUCKET_LABELS[bucket],
+    value: totals.get(bucket) ?? 0,
+  }));
+  return { totalValue, buckets };
+}
+
+export interface StockBucketProductRow {
+  name: string;
+  stock: number;
+  stockValue: number;
+  qty30: number;
+  daysOfStockLeft: number | null;
+}
+
+/** Products within one stock-speed bucket, for the bot's drill-down list — biggest money tied up first. */
+export async function getStockBucketProducts(bucket: StockValueBucket): Promise<StockBucketProductRow[]> {
+  const { rows } = await getWarehouseData();
+  return rows
+    .filter((r) => classifyStockBucket(r.daysOfStockLeft) === bucket)
+    .map((r) => ({ name: r.name, stock: r.stock, stockValue: r.stockValue, qty30: r.qty30, daysOfStockLeft: r.daysOfStockLeft }))
+    .sort((a, b) => b.stockValue - a.stockValue);
 }

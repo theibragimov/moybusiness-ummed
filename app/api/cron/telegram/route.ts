@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts } from "@/lib/reports";
+import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts } from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { formatRestockMessage, formatLowMarginMessage } from "@/lib/alertMessages";
+import { formatRestockMessage, formatLowMarginMessage, formatOutOfStockMessage } from "@/lib/alertMessages";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +22,13 @@ function authorized(req: NextRequest): boolean {
   );
 }
 
-async function runStockCheck(): Promise<{ sent: boolean; count: number }> {
-  const rows = await getRestockAlerts();
-  if (rows.length === 0) return { sent: false, count: 0 };
-  await sendTelegramMessage(formatRestockMessage(rows));
-  return { sent: true, count: rows.length };
+// Folded into one "stock" job (rather than its own cron) because Vercel's Hobby
+// plan caps a project at 2 cron jobs — this one and the margin check below.
+async function runStockCheck(): Promise<{ restock: number; outOfStock: number }> {
+  const [restock, outOfStock] = await Promise.all([getRestockAlerts(), getUrgentOutOfStockAlerts()]);
+  if (restock.length > 0) await sendTelegramMessage(formatRestockMessage(restock));
+  if (outOfStock.length > 0) await sendTelegramMessage(formatOutOfStockMessage(outOfStock));
+  return { restock: restock.length, outOfStock: outOfStock.length };
 }
 
 async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {

@@ -34,11 +34,12 @@ function chunkByLines(text: string, max: number): string[] {
   return chunks;
 }
 
-/** Reply-keyboard button label for the "out of stock but still selling" bot command. */
+/** Reply-keyboard button labels for the bot's persistent menu. */
 export const OUT_OF_STOCK_BUTTON_LABEL = "🚫 Tugagan, lekin sotilayotgan mahsulotlar";
+export const STOCK_MONEY_BUTTON_LABEL = "💰 Ombor puli";
 
 export const MAIN_KEYBOARD: ReplyKeyboard = {
-  keyboard: [[{ text: OUT_OF_STOCK_BUTTON_LABEL }]],
+  keyboard: [[{ text: OUT_OF_STOCK_BUTTON_LABEL }], [{ text: STOCK_MONEY_BUTTON_LABEL }]],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -49,10 +50,14 @@ export interface ReplyKeyboard {
   is_persistent?: boolean;
 }
 
+export interface InlineKeyboard {
+  inline_keyboard: { text: string; callback_data: string }[][];
+}
+
 interface SendOptions {
   /** Defaults to TELEGRAM_CHAT_ID — pass a different chat to reply to whoever triggered a bot command. */
   chatId?: string;
-  replyMarkup?: ReplyKeyboard;
+  replyMarkup?: ReplyKeyboard | InlineKeyboard;
 }
 
 async function sendOne(text: string, opts: SendOptions = {}): Promise<void> {
@@ -71,6 +76,15 @@ async function sendOne(text: string, opts: SendOptions = {}): Promise<void> {
     const body = await res.text().catch(() => "");
     throw new Error(`Telegram sendMessage failed: ${res.status} ${body.slice(0, 300)}`);
   }
+}
+
+/** Acknowledges a button press so Telegram stops showing a loading spinner on it. */
+export async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
+  await fetch(`${API_BASE}/bot${token()}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId }),
+  }).catch(() => undefined);
 }
 
 /** Sends a Telegram message, splitting it across multiple messages if it exceeds Telegram's length cap. */

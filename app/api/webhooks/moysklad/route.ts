@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRestockAlerts, getLowMarginSalesAlerts } from "@/lib/reports";
+import { getRestockAlerts, getLowMarginSalesAlerts, getUrgentOutOfStockAlerts } from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { formatRestockMessage, formatLowMarginMessage } from "@/lib/alertMessages";
+import { formatRestockMessage, formatLowMarginMessage, formatOutOfStockMessage } from "@/lib/alertMessages";
 import { todayYmd } from "@/lib/tashkent";
 
 export const dynamic = "force-dynamic";
@@ -35,9 +35,10 @@ export async function POST(req: NextRequest) {
 
   const today = todayYmd();
   try {
-    const [restock, sales] = await Promise.all([
+    const [restock, sales, outOfStock] = await Promise.all([
       getRestockAlerts(),
       getLowMarginSalesAlerts(0.25), // last 15 min — this fires right after the sale
+      getUrgentOutOfStockAlerts(),
     ]);
 
     const newRestock = restock.filter((r) => shouldAlert(`stock:${r.name}`, today));
@@ -49,7 +50,17 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage(formatLowMarginMessage(sales));
     }
 
-    return NextResponse.json({ ok: true, restock: newRestock.length, lowMarginSales: sales.length });
+    const newOutOfStock = outOfStock.filter((r) => shouldAlert(`oos:${r.name}`, today));
+    if (newOutOfStock.length > 0) {
+      await sendTelegramMessage(formatOutOfStockMessage(newOutOfStock));
+    }
+
+    return NextResponse.json({
+      ok: true,
+      restock: newRestock.length,
+      lowMarginSales: sales.length,
+      outOfStock: newOutOfStock.length,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
