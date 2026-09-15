@@ -1646,6 +1646,15 @@ export async function getYesterdaySoldNowOutOfStock(): Promise<YesterdaySoldOutO
 /** Below this margin (as a fraction, e.g. 0.05 = 5%) a sold line item is flagged. */
 const LOW_MARGIN_THRESHOLD = 0.05;
 
+// Counterparties shipped to intentionally at (near) purchase cost — not a real
+// low-margin problem, so excluded from the alert entirely.
+const LOW_MARGIN_ALERT_EXCLUDED_AGENTS = ["uzum market"];
+
+function isLowMarginAlertExcluded(agentName: string): boolean {
+  const name = agentName.trim().toLowerCase();
+  return LOW_MARGIN_ALERT_EXCLUDED_AGENTS.some((excluded) => name.includes(excluded));
+}
+
 export interface LowMarginItem {
   name: string;
   margin: number;
@@ -1692,6 +1701,7 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
 
   const results: LowMarginSaleRow[] = [];
   for (const d of demands) {
+    if (isLowMarginAlertExcluded(d.agent?.name ?? "")) continue;
     const positions = await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]);
     const items: LowMarginItem[] = positions
       .map((p) => ({ p, unitCost: p.cost ?? p.assortment?.buyPrice?.value }))
