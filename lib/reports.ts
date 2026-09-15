@@ -1666,14 +1666,17 @@ interface DemandPositionRow {
   id: string;
   quantity: number;
   price: number;
+  cost?: number; // actual FIFO-costed unit cost of the batch shipped, once MoySklad has costed the position
   assortment: { name: string; buyPrice?: { value: number } };
 }
 
 /**
  * MoySklad has no per-sale profit report (only aggregates by product/variant), so
- * margin here is computed line-by-line from each position's sale price against the
- * assortment's current purchase price — a live approximation, not the FIFO-costed
- * margin shown elsewhere in the app.
+ * margin here is computed line-by-line from each position's sale price against its
+ * actual shipped-batch cost (`cost`, FIFO-costed by MoySklad) — the real purchase
+ * price paid for that stock, which can differ from the assortment's current/reference
+ * purchase price (`buyPrice`) if it was received at a discount or price change.
+ * Falls back to `buyPrice` only when a position hasn't been costed yet.
  */
 async function getDemandPositions(demandId: string): Promise<DemandPositionRow[]> {
   return fetchAllRows<DemandPositionRow>(`entity/demand/${demandId}/positions`, { expand: "assortment" }, 200);
@@ -1691,12 +1694,13 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
   for (const d of demands) {
     const positions = await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]);
     const items: LowMarginItem[] = positions
-      .filter((p) => p.price > 0 && p.assortment?.buyPrice)
-      .map((p) => ({
+      .map((p) => ({ p, unitCost: p.cost ?? p.assortment?.buyPrice?.value }))
+      .filter((x): x is { p: DemandPositionRow; unitCost: number } => x.p.price > 0 && x.unitCost !== undefined)
+      .map(({ p, unitCost }) => ({
         name: p.assortment.name,
-        margin: (p.price - p.assortment.buyPrice!.value) / p.price,
+        margin: (p.price - unitCost) / p.price,
         sum: p.price * p.quantity,
-        unitCost: p.assortment.buyPrice!.value,
+        unitCost,
         unitPrice: p.price,
       }))
       .filter((p) => p.margin <= LOW_MARGIN_THRESHOLD);
