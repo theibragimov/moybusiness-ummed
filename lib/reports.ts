@@ -279,7 +279,7 @@ export function getDashboardData(todayYmd: string, monthStartYmd: string): Promi
 }
 
 async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Promise<DashboardData> {
-  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, counterpartyMeta, monthlyPL] =
+  const [monthDemands, monthCashouts, moneyReport, expenseItemNames, counterpartyMeta, monthlyPL, monthMoneyInSum] =
     await Promise.all([
       listDemands(monthStartYmd, todayYmd),
       listCashOutflows(monthStartYmd, todayYmd),
@@ -290,6 +290,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
       getExpenseItemNames(),
       getCounterpartyMeta(),
       getMonthlyPL(12),
+      getMoneyInSum(monthStartYmd, todayYmd),
     ]);
 
   const todayDemands = monthDemands.filter((d) => dayOf(d.moment) === todayYmd);
@@ -371,7 +372,7 @@ async function getDashboardDataImpl(todayYmd: string, monthStartYmd: string): Pr
   return {
     todaySalesSum: todayDemands.reduce((s, d) => s + d.sum, 0),
     todaySalesCount: todayDemands.length,
-    monthRevenueSum: monthDemands.reduce((s, d) => s + d.sum, 0),
+    monthRevenueSum: monthMoneyInSum,
     monthShipmentsCount: monthDemands.length,
     monthShipmentsSum: monthDemands.reduce((s, d) => s + d.sum, 0),
     monthExpensesSum,
@@ -1160,6 +1161,21 @@ async function getCashBreakdown(): Promise<{ bankBalance: number; kassaBalance: 
     kassaBalance: sum(cashin) - sum(cashout),
     bankBalance: sum(paymentin) - sum(paymentout),
   };
+}
+
+/**
+ * Actual money received (bank + cash) in a date range — what "Bu oy tushum"
+ * should show, as opposed to monthDemands' shipment sum which can include
+ * unpaid/partially paid otgruzkas.
+ */
+async function getMoneyInSum(from: string, to: string): Promise<number> {
+  const filter = buildFilter([`moment>=${momentFrom(from)}`, `moment<=${momentTo(to)}`]);
+  const [paymentins, cashins] = await Promise.all([
+    fetchAllRows<MoneySumRow>("entity/paymentin", { filter }, 20000).catch(() => [] as MoneySumRow[]),
+    fetchAllRows<MoneySumRow>("entity/cashin", { filter }, 20000).catch(() => [] as MoneySumRow[]),
+  ]);
+  const sum = (rows: MoneySumRow[]) => rows.reduce((s, r) => s + r.sum, 0);
+  return sum(paymentins) + sum(cashins);
 }
 
 /**
