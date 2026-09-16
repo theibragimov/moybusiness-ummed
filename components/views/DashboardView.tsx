@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck2, PackageCheck, ShoppingCart, TrendingUp, Wallet2 } from "lucide-react";
+import { CalendarCheck2, PackageCheck, ShoppingCart, TrendingUp, Wallet2, Boxes } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { StatCard } from "@/components/StatCard";
@@ -36,16 +36,16 @@ export function DashboardView({ data }: { data: DashboardData }) {
           accent="emerald"
         />
         <StatCard
-          icon={ShoppingCart}
-          label={t.dashboard.monthSales}
+          icon={Boxes}
+          label={t.dashboard.shipmentsSum}
           value={money(data.monthShipmentsSum)}
-          accent="brand"
+          hint={`${formatNumber(data.monthShipmentsCount, locale)} ${t.dashboard.documents}`}
+          accent="indigo"
         />
         <StatCard
           icon={PackageCheck}
           label={t.dashboard.shipmentsCount}
           value={formatNumber(data.monthShipmentsCount, locale)}
-          hint={money(data.monthShipmentsSum)}
           accent="amber"
         />
         <StatCard
