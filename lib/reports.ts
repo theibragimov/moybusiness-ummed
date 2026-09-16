@@ -1675,63 +1675,20 @@ interface DemandPositionRow {
   id: string;
   quantity: number;
   price: number;
+  cost?: number; // actual FIFO-costed unit cost of the batch shipped, once MoySklad has costed the position
   assortment: { name: string; buyPrice?: { value: number } };
 }
 
-async function getDemandPositions(demandId: string): Promise<DemandPositionRow[]> {
-  return fetchAllRows<DemandPositionRow>(`entity/demand/${demandId}/positions`, { expand: "assortment" }, 200);
-}
-
-interface SupplyPositionRow {
-  price: number;
-  assortment: { name: string };
-}
-
-async function getSupplyPositions(supplyId: string): Promise<SupplyPositionRow[]> {
-  return fetchAllRows<SupplyPositionRow>(`entity/supply/${supplyId}/positions`, { expand: "assortment" }, 200);
-}
-
-// How many of the most recent приемка (Supply) documents to scan, at most, when
-// resolving products' actual last-received price for the margin alert. Bounded so
-// this can't crawl the entire purchase history and blow the cron's time budget —
-// products that haven't been restocked more recently than this just fall back to
-// the assortment's buyPrice field.
-const SUPPLY_PRICE_LOOKBACK_DOCS = 60;
-
 /**
  * MoySklad has no per-sale profit report (only aggregates by product/variant), so
- * margin here is computed line-by-line from each position's sale price against the
- * price actually paid on the product's most recent приемка (goods receipt) — not
- * the assortment's buyPrice field, which is a reference/plan price that can go
- * stale if the last purchase came in below (or above) it.
- *
- * Scans Supply documents newest-first and keeps the first (i.e. most recent) price
- * seen per product name, stopping once every needed name is resolved or the lookback
- * cap is hit. Falls back to buyPrice for anything not found within that window.
+ * margin here is computed line-by-line from each position's sale price against its
+ * actual shipped-batch cost (`cost`, FIFO-costed by MoySklad) — the real purchase
+ * price paid for that stock, which can differ from the assortment's current/reference
+ * purchase price (`buyPrice`) if it was received at a discount or price change.
+ * Falls back to `buyPrice` only when a position hasn't been costed yet.
  */
-async function getLatestSupplyPrices(names: Set<string>): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-  if (names.size === 0) return result;
-  const remaining = new Set(names);
-
-  const supplies = await fetchAllRows<{ id: string }>(
-    "entity/supply",
-    { order: "moment,desc" },
-    SUPPLY_PRICE_LOOKBACK_DOCS
-  ).catch(() => [] as { id: string }[]);
-
-  for (const s of supplies) {
-    if (remaining.size === 0) break;
-    const positions = await getSupplyPositions(s.id).catch(() => [] as SupplyPositionRow[]);
-    for (const p of positions) {
-      const name = p.assortment?.name;
-      if (name && remaining.has(name)) {
-        result.set(name, p.price);
-        remaining.delete(name);
-      }
-    }
-  }
-  return result;
+async function getDemandPositions(demandId: string): Promise<DemandPositionRow[]> {
+  return fetchAllRows<DemandPositionRow>(`entity/demand/${demandId}/positions`, { expand: "assortment" }, 200);
 }
 
 /** Sales in the last `sinceHours` containing at least one line item sold at ≤10% margin. */
@@ -1742,24 +1699,12 @@ export async function getLowMarginSalesAlerts(sinceHours: number): Promise<LowMa
     500
   );
 
-  const candidates = await Promise.all(
-    demands
-      .filter((d) => !isLowMarginAlertExcluded(d.agent?.name ?? ""))
-      .map(async (d) => ({ d, positions: await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]) }))
-  );
-
-  const names = new Set<string>();
-  for (const { positions } of candidates) {
-    for (const p of positions) {
-      if (p.price > 0 && p.assortment?.name) names.add(p.assortment.name);
-    }
-  }
-  const supplyPrices = await getLatestSupplyPrices(names);
-
   const results: LowMarginSaleRow[] = [];
-  for (const { d, positions } of candidates) {
+  for (const d of demands) {
+    if (isLowMarginAlertExcluded(d.agent?.name ?? "")) continue;
+    const positions = await getDemandPositions(d.id).catch(() => [] as DemandPositionRow[]);
     const items: LowMarginItem[] = positions
-      .map((p) => ({ p, unitCost: supplyPrices.get(p.assortment?.name) ?? p.assortment?.buyPrice?.value }))
+      .map((p) => ({ p, unitCost: p.cost ?? p.assortment?.buyPrice?.value }))
       .filter((x): x is { p: DemandPositionRow; unitCost: number } => x.p.price > 0 && x.unitCost !== undefined)
       .map(({ p, unitCost }) => ({
         name: p.assortment.name,
