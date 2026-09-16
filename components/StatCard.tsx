@@ -14,13 +14,14 @@ export function StatCard({
   value: ReactNode;
   suffix?: string;
   hint?: string;
-  accent?: "brand" | "emerald" | "amber" | "rose";
+  accent?: "brand" | "emerald" | "amber" | "rose" | "indigo";
 }) {
   const accentClasses: Record<string, string> = {
     brand: "from-brand-400 to-brand-600",
     emerald: "from-emerald-400 to-emerald-600",
     amber: "from-amber-400 to-amber-600",
     rose: "from-rose-400 to-rose-600",
+    indigo: "from-indigo-400 to-indigo-600",
   };
 
   return (
