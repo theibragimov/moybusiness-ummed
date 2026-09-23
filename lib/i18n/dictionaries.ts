@@ -173,6 +173,10 @@ export const dictionaries = {
       supplierNoProducts: "Bu postavchikdan mahsulot tarixi topilmadi",
       totalRow: "Jami",
       downloadExcel: "Excelga yuklash",
+      removeProduct: "Ro'yxatdan olib tashlash",
+      restoreRemoved: "{count} ta olib tashlangan, qaytarish",
+      allProductsRemoved: "Barcha mahsulotlar ro'yxatdan olib tashlandi",
+      restoreAll: "Hammasini qaytarish",
     },
     expenses: {
       title: "Xarajatlar",
@@ -458,6 +462,10 @@ export const dictionaries = {
       supplierNoProducts: "У этого поставщика не найдено истории закупок",
       totalRow: "Итого",
       downloadExcel: "Скачать в Excel",
+      removeProduct: "Убрать из списка",
+      restoreRemoved: "Убрано {count}, вернуть",
+      allProductsRemoved: "Все товары убраны из списка",
+      restoreAll: "Вернуть всё",
     },
     expenses: {
       title: "Расходы",

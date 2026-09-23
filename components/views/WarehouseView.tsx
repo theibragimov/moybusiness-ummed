@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck, Download } from "lucide-react";
+import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck, Download, X, RotateCcw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber, fromMs } from "@/lib/format";
 import { Card } from "@/components/Card";
-import type { SupplierProductsData, SupplierRow, WarehouseData, WarehouseRow, WarehouseStatus } from "@/lib/reports";
+import type {
+  SupplierProductRow,
+  SupplierProductsData,
+  SupplierRow,
+  WarehouseData,
+  WarehouseRow,
+  WarehouseStatus,
+} from "@/lib/reports";
 
 type StatusFilter = "all" | WarehouseStatus;
 type Tab = "stock" | "suppliers";
@@ -206,10 +213,15 @@ function csvCell(v: string | number): string {
  * this avoids pulling in a spreadsheet-writing library. The UTF-8 BOM keeps
  * Cyrillic product names readable when Excel guesses the file's encoding.
  */
-function downloadSupplierCsv(data: SupplierProductsData, headers: string[], totalLabel: string) {
+function downloadSupplierCsv(
+  supplierName: string,
+  rows: SupplierProductRow[],
+  headers: string[],
+  totalLabel: string
+) {
   const lines = [
     headers,
-    ...data.rows.map((r, i) => [
+    ...rows.map((r, i) => [
       i + 1,
       r.name,
       r.stock,
@@ -224,9 +236,9 @@ function downloadSupplierCsv(data: SupplierProductsData, headers: string[], tota
       "",
       "",
       "",
-      fromMs(data.rows.reduce((s, r) => s + r.stockValue, 0)),
+      fromMs(rows.reduce((s, r) => s + r.stockValue, 0)),
       "",
-      fromMs(data.rows.reduce((s, r) => s + r.totalSumPurchased, 0)),
+      fromMs(rows.reduce((s, r) => s + r.totalSumPurchased, 0)),
       "",
     ],
   ];
@@ -235,7 +247,7 @@ function downloadSupplierCsv(data: SupplierProductsData, headers: string[], tota
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${data.supplierName || "postavchik"}.csv`;
+  a.download = `${supplierName || "postavchik"}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -247,6 +259,7 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
   const [data, setData] = useState<SupplierProductsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [excludedNames, setExcludedNames] = useState<Set<string>>(new Set());
   const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
 
   const filteredSuppliers = useMemo(() => {
@@ -263,6 +276,7 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
     let cancelled = false;
     setLoading(true);
     setError(false);
+    setExcludedNames(new Set());
     fetch(`/api/warehouse/supplier?id=${encodeURIComponent(selectedId)}`)
       .then((res) => {
         if (!res.ok) throw new Error("failed");
@@ -284,8 +298,13 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
 
   const debt = data ? Math.max(0, data.balance) : 0;
   const overpaid = data ? Math.max(0, -data.balance) : 0;
-  const totalCostStockValue = useMemo(() => data?.rows.reduce((s, r) => s + r.stockValue, 0) ?? 0, [data]);
-  const totalPurchasedSum = useMemo(() => data?.rows.reduce((s, r) => s + r.totalSumPurchased, 0) ?? 0, [data]);
+  const visibleRows = useMemo(
+    () => data?.rows.filter((r) => !excludedNames.has(r.name)) ?? [],
+    [data, excludedNames]
+  );
+  const totalCostStockValue = useMemo(() => visibleRows.reduce((s, r) => s + r.stockValue, 0), [visibleRows]);
+  const totalPurchasedSum = useMemo(() => visibleRows.reduce((s, r) => s + r.totalSumPurchased, 0), [visibleRows]);
+  const removeRow = (name: string) => setExcludedNames((prev) => new Set(prev).add(name));
 
   return (
     <div className="space-y-6">
@@ -337,14 +356,27 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
             <div>
               <h2 className="text-lg font-bold text-ink-900">{data.supplierName}</h2>
               <p className="mt-1 text-xs text-ink-400">
-                {formatNumber(data.rows.length, locale)} {t.warehouse.supplierProductCount}
+                {formatNumber(visibleRows.length, locale)} {t.warehouse.supplierProductCount}
+                {excludedNames.size > 0 && (
+                  <>
+                    {" · "}
+                    <button
+                      onClick={() => setExcludedNames(new Set())}
+                      className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
+                    >
+                      <RotateCcw size={11} />
+                      {t.warehouse.restoreRemoved.replace("{count}", String(excludedNames.size))}
+                    </button>
+                  </>
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() =>
                   downloadSupplierCsv(
-                    data,
+                    data.supplierName,
+                    visibleRows,
                     [
                       "#",
                       t.warehouse.product,
@@ -395,11 +427,12 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.totalQtyPurchased}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.totalSumPurchased}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.lastPurchaseDate}</th>
+                    <th className="whitespace-nowrap px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface">
-                  {data.rows.map((r, i) => (
-                    <tr key={r.name + i}>
+                  {visibleRows.map((r, i) => (
+                    <tr key={r.name} className="group">
                       <td className="whitespace-nowrap px-3 py-2.5 text-ink-400">{i + 1}</td>
                       <td className="px-3 py-2.5 font-medium text-ink-900">{r.name}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
@@ -416,10 +449,19 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
                       <td className="whitespace-nowrap px-3 py-2.5 text-ink-500">
                         {r.lastPurchaseDate ? r.lastPurchaseDate.slice(0, 10) : "—"}
                       </td>
+                      <td className="whitespace-nowrap px-2 py-2.5 text-right">
+                        <button
+                          onClick={() => removeRow(r.name)}
+                          title={t.warehouse.removeProduct}
+                          className="rounded-full p-1.5 text-ink-300 opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
-                {data.rows.length > 0 && (
+                {visibleRows.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-surface font-bold text-ink-900">
                       <td className="px-3 py-2.5" colSpan={4}>
@@ -429,12 +471,25 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
                       <td></td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-right">{money(totalPurchasedSum)}</td>
                       <td></td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 )}
               </table>
               {data.rows.length === 0 && (
                 <p className="py-10 text-center text-sm text-ink-400">{t.warehouse.supplierNoProducts}</p>
+              )}
+              {data.rows.length > 0 && visibleRows.length === 0 && (
+                <div className="py-10 text-center text-sm text-ink-400">
+                  <p>{t.warehouse.allProductsRemoved}</p>
+                  <button
+                    onClick={() => setExcludedNames(new Set())}
+                    className="mt-2 inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
+                  >
+                    <RotateCcw size={12} />
+                    {t.warehouse.restoreAll}
+                  </button>
+                </div>
               )}
             </div>
           </Card>
