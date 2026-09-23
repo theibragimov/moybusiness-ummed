@@ -171,6 +171,7 @@ export const dictionaries = {
       totalSumPurchased: "Jami xarid summasi",
       lastPurchaseDate: "Oxirgi xarid sanasi",
       supplierNoProducts: "Bu postavchikdan mahsulot tarixi topilmadi",
+      totalRow: "Jami",
     },
     expenses: {
       title: "Xarajatlar",
@@ -454,6 +455,7 @@ export const dictionaries = {
       totalSumPurchased: "Общая сумма закупки",
       lastPurchaseDate: "Дата последней закупки",
       supplierNoProducts: "У этого поставщика не найдено истории закупок",
+      totalRow: "Итого",
     },
     expenses: {
       title: "Расходы",

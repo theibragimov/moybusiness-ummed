@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck, Wallet } from "lucide-react";
+import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { Card } from "@/components/Card";
-import { StatCard } from "@/components/StatCard";
 import type { SupplierProductsData, SupplierRow, WarehouseData, WarehouseRow, WarehouseStatus } from "@/lib/reports";
 
 type StatusFilter = "all" | WarehouseStatus;
@@ -241,6 +240,8 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
 
   const debt = data ? Math.max(0, data.balance) : 0;
   const overpaid = data ? Math.max(0, -data.balance) : 0;
+  const totalCostStockValue = useMemo(() => data?.rows.reduce((s, r) => s + r.stockValue, 0) ?? 0, [data]);
+  const totalPurchasedSum = useMemo(() => data?.rows.reduce((s, r) => s + r.totalSumPurchased, 0) ?? 0, [data]);
 
   return (
     <div className="space-y-6">
@@ -288,26 +289,31 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
 
       {selectedId && !loading && !error && data && (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-bold text-ink-900">{data.supplierName}</h2>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              icon={PackageCheck}
-              label={t.warehouse.supplierProductCount}
-              value={formatNumber(data.rows.length, locale)}
-              accent="brand"
-            />
-            <StatCard
-              icon={Wallet}
-              label={debt > 0 ? t.warehouse.supplierOurDebt : t.warehouse.supplierNoDebt}
-              value={money(debt)}
-              accent={debt > 0 ? "rose" : "emerald"}
-            />
-            {overpaid > 0 && (
-              <StatCard icon={Wallet} label={t.warehouse.supplierOverpaid} value={money(overpaid)} accent="amber" />
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-ink-900">{data.supplierName}</h2>
+              <p className="mt-1 text-xs text-ink-400">
+                {formatNumber(data.rows.length, locale)} {t.warehouse.supplierProductCount}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className={`rounded-2xl px-4 py-2.5 text-right ${debt > 0 ? "bg-rose-50" : "bg-emerald-50"}`}
+              >
+                <p className={`text-xs font-medium ${debt > 0 ? "text-rose-500" : "text-emerald-600"}`}>
+                  {debt > 0 ? t.warehouse.supplierOurDebt : t.warehouse.supplierNoDebt}
+                </p>
+                <p className={`text-lg font-bold ${debt > 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                  {money(debt)}
+                </p>
+              </div>
+              {overpaid > 0 && (
+                <div className="rounded-2xl bg-amber-50 px-4 py-2.5 text-right">
+                  <p className="text-xs font-medium text-amber-600">{t.warehouse.supplierOverpaid}</p>
+                  <p className="text-lg font-bold text-amber-700">{money(overpaid)}</p>
+                </div>
+              )}
+            </div>
           </div>
 
           <Card>
@@ -347,6 +353,19 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
                     </tr>
                   ))}
                 </tbody>
+                {data.rows.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-surface font-bold text-ink-900">
+                      <td className="px-3 py-2.5" colSpan={4}>
+                        {t.warehouse.totalRow}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right">{money(totalCostStockValue)}</td>
+                      <td></td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right">{money(totalPurchasedSum)}</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
               {data.rows.length === 0 && (
                 <p className="py-10 text-center text-sm text-ink-400">{t.warehouse.supplierNoProducts}</p>
