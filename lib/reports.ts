@@ -774,6 +774,125 @@ async function getCounterpartiesImpl(): Promise<CounterpartyRow[]> {
   }));
 }
 
+// ---------- supplier product breakdown ----------
+
+export interface SupplierRow {
+  id: string;
+  name: string;
+  balance: number;
+}
+
+/** Suppliers (counterparties tagged with the "Поставшик" state) for the picker in the warehouse supplier view. */
+export async function getSuppliers(): Promise<SupplierRow[]> {
+  const rows = await getCounterparties();
+  return rows
+    .filter((r) => r.segment === "supplier")
+    .map((r) => ({ id: r.id, name: r.name, balance: r.balance }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface SupplierProductRow {
+  name: string;
+  stock: number;
+  stockValue: number;
+  lastCost: number;
+  lastPurchaseDate: string;
+  totalQtyPurchased: number;
+  totalSumPurchased: number;
+}
+
+export interface SupplierProductsData {
+  supplierId: string;
+  supplierName: string;
+  /** MoySklad counterparty balance: positive = we owe the supplier, negative = they owe us / we overpaid. */
+  balance: number;
+  rows: SupplierProductRow[];
+}
+
+interface SupplyPositionExpandedRow {
+  quantity: number;
+  price: number;
+  assortment?: { name: string };
+}
+
+interface SupplyWithPositionsRow {
+  id: string;
+  moment: string;
+  positions?: { rows: SupplyPositionExpandedRow[] };
+}
+
+// MoySklad silently stops resolving `expand` once a list request's `limit` exceeds
+// ~100 (same constraint noted for cashout lists above), so приемка (supply) documents
+// for a supplier are paged at 100/request with positions inlined via expand — far
+// cheaper than fetching each document's positions individually.
+const SUPPLIER_SUPPLY_PAGE_LIMIT = 100;
+
+async function fetchSupplierSupplies(supplierId: string): Promise<SupplyWithPositionsRow[]> {
+  return fetchAllRows<SupplyWithPositionsRow>(
+    "entity/supply",
+    {
+      filter: buildFilter([`agent=${entityHref("counterparty", supplierId)}`]),
+      expand: "positions,positions.assortment",
+    },
+    10000,
+    SUPPLIER_SUPPLY_PAGE_LIMIT
+  );
+}
+
+export function getSupplierProducts(supplierId: string): Promise<SupplierProductsData> {
+  return cached(`supplier-products:${supplierId}:${todayYmd()}`, () => getSupplierProductsImpl(supplierId));
+}
+
+async function getSupplierProductsImpl(supplierId: string): Promise<SupplierProductsData> {
+  const [supplies, stockRows, suppliers] = await Promise.all([
+    fetchSupplierSupplies(supplierId),
+    getStockSnapshot(),
+    getSuppliers(),
+  ]);
+
+  const supplier = suppliers.find((s) => s.id === supplierId);
+
+  const agg = new Map<string, { qty: number; sum: number; lastCost: number; lastMoment: string }>();
+  for (const s of supplies) {
+    for (const p of s.positions?.rows ?? []) {
+      const name = p.assortment?.name;
+      if (!name) continue;
+      const existing = agg.get(name) ?? { qty: 0, sum: 0, lastCost: 0, lastMoment: "" };
+      existing.qty += p.quantity;
+      existing.sum += p.quantity * p.price;
+      if (s.moment > existing.lastMoment) {
+        existing.lastMoment = s.moment;
+        existing.lastCost = p.price;
+      }
+      agg.set(name, existing);
+    }
+  }
+
+  const stockByName = new Map(stockRows.map((r) => [r.name, r.stock]));
+
+  const rows: SupplierProductRow[] = [...agg.entries()]
+    .map(([name, v]) => {
+      const stock = stockByName.get(name) ?? 0;
+      return {
+        name,
+        stock,
+        stockValue: stock * v.lastCost,
+        lastCost: v.lastCost,
+        lastPurchaseDate: v.lastMoment,
+        totalQtyPurchased: v.qty,
+        totalSumPurchased: v.sum,
+      };
+    })
+    .sort((a, b) => b.totalSumPurchased - a.totalSumPurchased);
+
+  return {
+    supplierId,
+    supplierName: supplier?.name ?? "",
+    balance: supplier?.balance ?? 0,
+    rows,
+  };
+}
+
 // ---------- CRM / ABC customer analysis ----------
 
 export interface CustomerAbcRow {

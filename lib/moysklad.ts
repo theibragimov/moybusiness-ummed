@@ -95,9 +95,10 @@ export function buildFilter(clauses: string[]): string {
 export async function fetchAllRows<T>(
   path: string,
   params: Record<string, string | number | undefined> = {},
-  maxRows = 5000
+  maxRows = 5000,
+  pageLimit = 1000
 ): Promise<T[]> {
-  const limit = 1000;
+  const limit = pageLimit;
   let offset = 0;
   const all: T[] = [];
   for (;;) {

@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search, PackageCheck, Clock, PackageX, CalendarClock } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck, Wallet } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { Card } from "@/components/Card";
-import type { WarehouseData, WarehouseRow, WarehouseStatus } from "@/lib/reports";
+import { StatCard } from "@/components/StatCard";
+import type { SupplierProductsData, SupplierRow, WarehouseData, WarehouseRow, WarehouseStatus } from "@/lib/reports";
 
 type StatusFilter = "all" | WarehouseStatus;
+type Tab = "stock" | "suppliers";
 
 const STATUS_BADGE: Record<WarehouseStatus, string> = {
   normal: "bg-emerald-500 text-white",
@@ -38,7 +40,7 @@ const STATUS_CARD: Record<WarehouseStatus, string> = {
   expiring: "from-violet-400 to-violet-600",
 };
 
-export function WarehouseView({ data }: { data: WarehouseData }) {
+function StockSection({ data }: { data: WarehouseData }) {
   const { t, locale } = useLanguage();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -64,11 +66,6 @@ export function WarehouseView({ data }: { data: WarehouseData }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-ink-900">{t.warehouse.title}</h1>
-        <p className="mt-1 text-sm text-ink-500">{t.warehouse.subtitle}</p>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {data.summary.map((s) => {
           const Icon = STATUS_ICON[s.status];
@@ -196,6 +193,205 @@ export function WarehouseView({ data }: { data: WarehouseData }) {
       </Card>
 
       <p className="text-xs text-ink-400">{t.warehouse.leadTimeNote}</p>
+    </div>
+  );
+}
+
+function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
+  const { t, locale } = useLanguage();
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [data, setData] = useState<SupplierProductsData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const money = (v: number) => `${formatMoney(v, locale)} ${t.common.sum}`;
+
+  const filteredSuppliers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter((s) => s.name.toLowerCase().includes(q));
+  }, [suppliers, query]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setData(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    fetch(`/api/warehouse/supplier?id=${encodeURIComponent(selectedId)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("failed");
+        return res.json() as Promise<SupplierProductsData>;
+      })
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  const debt = data ? Math.max(0, data.balance) : 0;
+  const overpaid = data ? Math.max(0, -data.balance) : 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex max-w-md flex-1 items-center gap-2 rounded-full bg-white px-4 py-2.5 shadow-card">
+          <Search size={16} className="text-ink-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t.warehouse.supplierSearchPlaceholder}
+            className="w-full bg-transparent text-sm outline-none placeholder:text-ink-400"
+          />
+        </div>
+        <select
+          value={selectedId ?? ""}
+          onChange={(e) => setSelectedId(e.target.value || null)}
+          className="rounded-full bg-white px-4 py-2.5 text-sm font-medium text-ink-700 shadow-card outline-none"
+        >
+          <option value="">{t.warehouse.supplierPickerLabel}</option>
+          {filteredSuppliers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {!selectedId && (
+        <Card>
+          <p className="py-6 text-center text-sm text-ink-400">{t.warehouse.supplierNoSelection}</p>
+        </Card>
+      )}
+
+      {selectedId && loading && (
+        <Card>
+          <p className="py-6 text-center text-sm text-ink-400">{t.common.loading}</p>
+        </Card>
+      )}
+
+      {selectedId && !loading && error && (
+        <Card>
+          <p className="py-6 text-center text-sm text-rose-500">{t.warehouse.supplierLoadError}</p>
+        </Card>
+      )}
+
+      {selectedId && !loading && !error && data && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-bold text-ink-900">{data.supplierName}</h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard
+              icon={PackageCheck}
+              label={t.warehouse.supplierProductCount}
+              value={formatNumber(data.rows.length, locale)}
+              accent="brand"
+            />
+            <StatCard
+              icon={Wallet}
+              label={debt > 0 ? t.warehouse.supplierOurDebt : t.warehouse.supplierNoDebt}
+              value={money(debt)}
+              accent={debt > 0 ? "rose" : "emerald"}
+            />
+            {overpaid > 0 && (
+              <StatCard icon={Wallet} label={t.warehouse.supplierOverpaid} value={money(overpaid)} accent="amber" />
+            )}
+          </div>
+
+          <Card>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-sm [font-variant-numeric:tabular-nums]">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">#</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{t.warehouse.product}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.stock}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.lastCost}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.costStockValue}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.totalQtyPurchased}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.totalSumPurchased}</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.lastPurchaseDate}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface">
+                  {data.rows.map((r, i) => (
+                    <tr key={r.name + i}>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-ink-400">{i + 1}</td>
+                      <td className="max-w-[260px] truncate px-3 py-2.5 font-medium text-ink-900">{r.name}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                        {formatNumber(r.stock, locale)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">{money(r.lastCost)}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">{money(r.stockValue)}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
+                        {formatNumber(r.totalQtyPurchased, locale)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-ink-900">
+                        {money(r.totalSumPurchased)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-ink-500">
+                        {r.lastPurchaseDate ? r.lastPurchaseDate.slice(0, 10) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {data.rows.length === 0 && (
+                <p className="py-10 text-center text-sm text-ink-400">{t.warehouse.supplierNoProducts}</p>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function WarehouseView({ data, suppliers }: { data: WarehouseData; suppliers: SupplierRow[] }) {
+  const { t } = useLanguage();
+  const [tab, setTab] = useState<Tab>("stock");
+
+  const tabs: { key: Tab; label: string; icon: LucideIcon }[] = [
+    { key: "stock", label: t.warehouse.tabStock, icon: PackageCheck },
+    { key: "suppliers", label: t.warehouse.tabSuppliers, icon: Truck },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900">{t.warehouse.title}</h1>
+        <p className="mt-1 text-sm text-ink-500">{t.warehouse.subtitle}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 rounded-full bg-white p-1.5 shadow-card">
+        {tabs.map((tb) => (
+          <button
+            key={tb.key}
+            onClick={() => setTab(tb.key)}
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              tab === tb.key ? "bg-brand-500 text-white shadow-soft" : "text-ink-500 hover:bg-surface"
+            }`}
+          >
+            <tb.icon size={14} />
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "stock" && <StockSection data={data} />}
+      {tab === "suppliers" && <SupplierSection suppliers={suppliers} />}
     </div>
   );
 }
