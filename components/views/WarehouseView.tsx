@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck } from "lucide-react";
+import { Search, PackageCheck, Clock, PackageX, CalendarClock, Truck, Download } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, fromMs } from "@/lib/format";
 import { Card } from "@/components/Card";
 import type { SupplierProductsData, SupplierRow, WarehouseData, WarehouseRow, WarehouseStatus } from "@/lib/reports";
 
@@ -196,6 +196,50 @@ function StockSection({ data }: { data: WarehouseData }) {
   );
 }
 
+function csvCell(v: string | number): string {
+  const s = String(v);
+  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * A plain CSV (not a real .xlsx) — Excel opens it natively on double-click, and
+ * this avoids pulling in a spreadsheet-writing library. The UTF-8 BOM keeps
+ * Cyrillic product names readable when Excel guesses the file's encoding.
+ */
+function downloadSupplierCsv(data: SupplierProductsData, headers: string[], totalLabel: string) {
+  const lines = [
+    headers,
+    ...data.rows.map((r, i) => [
+      i + 1,
+      r.name,
+      r.stock,
+      fromMs(r.lastCost),
+      fromMs(r.stockValue),
+      r.totalQtyPurchased,
+      fromMs(r.totalSumPurchased),
+      r.lastPurchaseDate ? r.lastPurchaseDate.slice(0, 10) : "",
+    ]),
+    [
+      totalLabel,
+      "",
+      "",
+      "",
+      fromMs(data.rows.reduce((s, r) => s + r.stockValue, 0)),
+      "",
+      fromMs(data.rows.reduce((s, r) => s + r.totalSumPurchased, 0)),
+      "",
+    ],
+  ];
+  const csv = "﻿" + lines.map((row) => row.map(csvCell).join(";")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${data.supplierName || "postavchik"}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
   const { t, locale } = useLanguage();
   const [query, setQuery] = useState("");
@@ -297,6 +341,28 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() =>
+                  downloadSupplierCsv(
+                    data,
+                    [
+                      "#",
+                      t.warehouse.product,
+                      t.warehouse.stock,
+                      t.warehouse.lastCost,
+                      t.warehouse.costStockValue,
+                      t.warehouse.totalQtyPurchased,
+                      t.warehouse.totalSumPurchased,
+                      t.warehouse.lastPurchaseDate,
+                    ],
+                    t.warehouse.totalRow
+                  )
+                }
+                className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-xs font-semibold text-ink-500 transition-colors hover:text-ink-900"
+              >
+                <Download size={14} />
+                <span className="hidden lg:inline">{t.warehouse.downloadExcel}</span>
+              </button>
               <div
                 className={`rounded-2xl px-4 py-2.5 text-right ${debt > 0 ? "bg-rose-50" : "bg-emerald-50"}`}
               >
@@ -318,11 +384,11 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
 
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[960px] text-sm [font-variant-numeric:tabular-nums]">
+              <table className="w-full min-w-[1100px] text-sm [font-variant-numeric:tabular-nums]">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-ink-400">
                     <th className="whitespace-nowrap px-3 py-2 font-medium">#</th>
-                    <th className="whitespace-nowrap px-3 py-2 font-medium">{t.warehouse.product}</th>
+                    <th className="min-w-[320px] px-3 py-2 font-medium">{t.warehouse.product}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.stock}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.lastCost}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{t.warehouse.costStockValue}</th>
@@ -335,7 +401,7 @@ function SupplierSection({ suppliers }: { suppliers: SupplierRow[] }) {
                   {data.rows.map((r, i) => (
                     <tr key={r.name + i}>
                       <td className="whitespace-nowrap px-3 py-2.5 text-ink-400">{i + 1}</td>
-                      <td className="max-w-[260px] truncate px-3 py-2.5 font-medium text-ink-900">{r.name}</td>
+                      <td className="px-3 py-2.5 font-medium text-ink-900">{r.name}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-700">
                         {formatNumber(r.stock, locale)}
                       </td>
