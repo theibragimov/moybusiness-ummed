@@ -9,8 +9,13 @@ import {
   getExpensesData,
   getCounterparties,
   getWarehouseData,
+  getSuppliers,
+  getCompanyHealth,
+  getDebtsData,
+  getNetProfitData,
+  getCustomerAbc,
 } from "@/lib/reports";
-import { monthStartYmd, monthEndYmd } from "@/lib/tashkent";
+import { todayYmd, monthStartYmd, monthEndYmd } from "@/lib/tashkent";
 
 export async function refreshAllData() {
   bumpCacheEpoch();
@@ -24,6 +29,7 @@ export async function refreshAllData() {
  * instead of racing the user's own navigation.
  */
 export async function warmAllData() {
+  const today = todayYmd();
   const from = monthStartYmd();
   const to = monthEndYmd();
   await Promise.allSettled([
@@ -31,6 +37,11 @@ export async function warmAllData() {
     getExpensesData(from, to),
     getCounterparties(),
     getWarehouseData(),
+    getSuppliers(),
+    getCompanyHealth(today, from),
+    getDebtsData(),
+    getNetProfitData(from, to),
+    getCustomerAbc(from, to),
   ]);
 }
 

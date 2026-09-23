@@ -2048,11 +2048,14 @@ interface IncomingPaymentRow {
  * are expensive to page through on this account (~5s per 1000-row page), and a
  * debtor list only ever needs to know "did they pay within the last N days".
  */
-function getRecentPaymentDates(windowDays: number): Promise<Map<string, string>> {
+// A plain object, not a Map: `cached()` persists results through Next's Data
+// Cache (see lib/cache.ts), which round-trips values through JSON — a Map
+// would silently serialize to `{}` and lose every entry.
+function getRecentPaymentDates(windowDays: number): Promise<Record<string, string>> {
   return cached(`recent-payment-dates:${windowDays}`, () => getRecentPaymentDatesImpl(windowDays));
 }
 
-async function getRecentPaymentDatesImpl(windowDays: number): Promise<Map<string, string>> {
+async function getRecentPaymentDatesImpl(windowDays: number): Promise<Record<string, string>> {
   const filter = buildFilter([`moment>=${momentFrom(daysAgoYmd(windowDays - 1))}`]);
   const [paymentins, cashins] = await Promise.all([
     fetchAllRows<IncomingPaymentRow>("entity/paymentin", { filter, expand: "agent" }, 5000).catch(
@@ -2062,15 +2065,15 @@ async function getRecentPaymentDatesImpl(windowDays: number): Promise<Map<string
       () => [] as IncomingPaymentRow[]
     ),
   ]);
-  const map = new Map<string, string>();
+  const dates: Record<string, string> = {};
   for (const p of [...paymentins, ...cashins]) {
     const href = p.agent?.meta.href;
     if (!href) continue;
     const id = idFromHref(href);
-    const cur = map.get(id);
-    if (!cur || p.moment > cur) map.set(id, p.moment);
+    const cur = dates[id];
+    if (!cur || p.moment > cur) dates[id] = p.moment;
   }
-  return map;
+  return dates;
 }
 
 export interface DebtorRow {
@@ -2103,7 +2106,7 @@ export async function getStaleDebtors30d(): Promise<DebtorRow[]> {
       name: c.name,
       phone: c.phone,
       balance: c.balance,
-      lastPaymentDate: recentPayments.get(c.id) ?? null,
+      lastPaymentDate: recentPayments[c.id] ?? null,
       lastDemandDate: c.lastDemandDate,
     }))
     .filter((r) => r.lastPaymentDate === null || dayOf(r.lastPaymentDate) < cutoff)
@@ -2120,7 +2123,7 @@ export async function getDormantDebtors3mo(): Promise<DebtorRow[]> {
       name: c.name,
       phone: c.phone,
       balance: c.balance,
-      lastPaymentDate: recentPayments.get(c.id) ?? null,
+      lastPaymentDate: recentPayments[c.id] ?? null,
       lastDemandDate: c.lastDemandDate,
     }))
     .filter((r) => r.lastPaymentDate === null || dayOf(r.lastPaymentDate) < cutoff)
