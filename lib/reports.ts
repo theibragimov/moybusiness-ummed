@@ -152,6 +152,28 @@ export interface DashboardData {
 }
 
 /**
+ * Per-product profit report for one calendar month. MoySklad takes 10-20s to
+ * build each of these, and a finished month never changes, so past months are
+ * cached for a day (shared by the dashboard, net-profit and month-end reports)
+ * while the running month keeps the normal short TTL.
+ */
+const CLOSED_MONTH_TTL_SECONDS = 24 * 60 * 60;
+
+function getMonthProfitRows(m: { label: string; start: string; end: string }): Promise<ProfitByProductRow[]> {
+  const closed = m.end < todayYmd();
+  return cached(
+    `profit-month:${m.label}`,
+    () =>
+      fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+        momentFrom: momentFrom(m.start),
+        momentTo: momentTo(m.end),
+      }).catch(() => [] as ProfitByProductRow[]),
+    closed ? CLOSED_MONTH_TTL_SECONDS : undefined
+  );
+}
+
+
+/**
  * Revenue, gross profit, net profit and operating expenses for each of the last
  * `count` real calendar months (oldest first), for the dashboard trend chart.
  */
@@ -160,10 +182,7 @@ async function getMonthlyPL(count: number): Promise<MonthlyPLRow[]> {
   const [profitByMonth, opexRows, expenseItemNames] = await Promise.all([
     Promise.all(
       months.map((m) =>
-        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-          momentFrom: momentFrom(m.start),
-          momentTo: momentTo(m.end),
-        }).catch(() => [] as ProfitByProductRow[])
+        getMonthProfitRows(m)
       )
     ),
     listCashOutflows(months[0].start, months[months.length - 1].end),
@@ -233,10 +252,7 @@ export async function getMonthlyComparisonReport(): Promise<MonthlyComparisonRep
   const [profitByMonth, cashoutsByMonth, expenseItemNames] = await Promise.all([
     Promise.all(
       [prevMonth, curMonth].map((m) =>
-        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-          momentFrom: momentFrom(m.start),
-          momentTo: momentTo(m.end),
-        }).catch(() => [] as ProfitByProductRow[])
+        getMonthProfitRows(m)
       )
     ),
     Promise.all([prevMonth, curMonth].map((m) => listCashOutflows(m.start, m.end))),
@@ -1312,10 +1328,7 @@ async function getNetProfitBudgetAvgImpl(): Promise<number> {
   const [profitByMonth, opexRows, expenseItemNames] = await Promise.all([
     Promise.all(
       months.map((m) =>
-        fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-          momentFrom: momentFrom(m.start),
-          momentTo: momentTo(m.end),
-        }).catch(() => [] as ProfitByProductRow[])
+        getMonthProfitRows(m)
       )
     ),
     listCashOutflows(months[0].start, months[months.length - 1].end),

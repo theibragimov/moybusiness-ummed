@@ -5,6 +5,9 @@ import { LanguageProvider } from "@/lib/i18n/context";
 import { TopNav } from "@/components/TopNav";
 import { CacheWarmer } from "@/components/CacheWarmer";
 
+// Cold report loads hit slow MoySklad endpoints; the Hobby default of 10s would cut them off.
+export const maxDuration = 60;
+
 const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-inter" });
 
 export const metadata: Metadata = {

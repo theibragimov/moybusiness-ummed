@@ -16,8 +16,12 @@ const REVALIDATE_SECONDS = 15 * 60;
  * round-trips them through JSON) — a `Map`, `Set`, or class instance will
  * silently come back as `{}`. Use plain objects/arrays/records instead.
  */
-export function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  return unstable_cache(fn, [key], { revalidate: REVALIDATE_SECONDS, tags: [CACHE_TAG] })();
+export function cached<T>(
+  key: string,
+  fn: () => Promise<T>,
+  revalidateSeconds: number = REVALIDATE_SECONDS
+): Promise<T> {
+  return unstable_cache(fn, [key], { revalidate: revalidateSeconds, tags: [CACHE_TAG] })();
 }
 
 export function bumpCacheEpoch() {
