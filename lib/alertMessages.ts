@@ -93,15 +93,18 @@ export function buildRestockPage(rows: RestockAlertRow[], offset = 0): Page {
   );
 }
 
-const OOS_HEADER = "🚫 <b>Tugagan, lekin so'nggi 10 kunda sotilgan mahsulotlar</b>";
+const OOS_HEADER = "🚫 <b>Tugagan, lekin so'nggi 30 kunda sotilgan mahsulotlar</b>";
 
 export function buildOosPage(rows: OutOfStockRecentSellerRow[], offset = 0): Page {
   return buildPage(
     OOS_HEADER,
-    "Hozircha tugagan, lekin so'nggi 10 kunda sotilgan mahsulot yo'q.",
+    "Hozircha tugagan, lekin so'nggi 30 kunda sotilgan mahsulot yo'q.",
     rows,
     offset,
-    (r, i) => `${i}. <b>${escapeHtml(r.name)}</b>\n📦 Qoldiq: <b>${formatNumber(r.stock)}</b>\n📈 10 kunlik sotuv: <b>${formatNumber(r.qty10)}</b> dona`,
+    (r, i) =>
+      `${i}. <b>${escapeHtml(r.name)}</b>\n📦 Qoldiq: <b>${formatNumber(r.stock)}</b>` +
+      `\n📈 So'nggi 30 kun: <b>${formatNumber(r.qty30)}</b> dona` +
+      `\n🕐 Undan oldingi 30 kun: <b>${formatNumber(r.qtyPrev30)}</b> dona`,
     "oos",
     "-"
   );

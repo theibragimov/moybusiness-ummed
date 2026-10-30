@@ -1698,46 +1698,72 @@ export async function getRestockAlerts(): Promise<RestockAlertRow[]> {
     .sort((a, b) => a.stock - b.stock);
 }
 
-const OUT_OF_STOCK_LOOKBACK_DAYS = 10;
+const OUT_OF_STOCK_LOOKBACK_DAYS = 30;
 
 export interface OutOfStockRecentSellerRow {
   name: string;
   stock: number;
-  qty10: number;
+  /** Units sold in the last 30 days (today included). */
+  qty30: number;
+  /** Units sold in the 30 days before that — for comparison. */
+  qtyPrev30: number;
 }
 
-/** Products at zero (or negative) stock that still sold within the last 10 days — on-demand, via the bot's button. */
+function sumSellQtyByName(rows: ProfitByProductRow[]): Map<string, number> {
+  const byName = new Map<string, number>();
+  for (const r of rows) {
+    if (r.sellQuantity <= 0) continue;
+    byName.set(r.assortment.name, (byName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+  return byName;
+}
+
+/**
+ * Products at zero (or negative) stock that still sold within the last 30 days, with
+ * the previous 30 days' sales alongside — on-demand, via the bot's button.
+ */
 export async function getOutOfStockRecentSellers(): Promise<OutOfStockRecentSellerRow[]> {
   const today = todayYmd();
-  const from10 = daysAgoYmd(OUT_OF_STOCK_LOOKBACK_DAYS - 1);
-  const [stockRows, rows10] = await Promise.all([
+  const from30 = daysAgoYmd(OUT_OF_STOCK_LOOKBACK_DAYS - 1);
+  const prevTo = daysAgoYmd(OUT_OF_STOCK_LOOKBACK_DAYS);
+  const prevFrom = daysAgoYmd(OUT_OF_STOCK_LOOKBACK_DAYS * 2 - 1);
+  const [stockRows, rows30, rowsPrev30] = await Promise.all([
     getStockSnapshot(),
     fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
-      momentFrom: momentFrom(from10),
+      momentFrom: momentFrom(from30),
       momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(prevFrom),
+      momentTo: momentTo(prevTo),
     }).catch(() => [] as ProfitByProductRow[]),
   ]);
 
-  const qty10ByName = new Map<string, number>();
-  for (const r of rows10) {
-    if (r.sellQuantity <= 0) continue;
-    qty10ByName.set(r.assortment.name, (qty10ByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
-  }
+  const qty30ByName = sumSellQtyByName(rows30);
+  const qtyPrev30ByName = sumSellQtyByName(rowsPrev30);
 
   return stockRows
     .filter((r) => r.stock <= 0)
-    .map((r) => ({ name: r.name, stock: r.stock, qty10: qty10ByName.get(r.name) ?? 0 }))
-    .filter((r) => r.qty10 > 0)
-    .sort((a, b) => b.qty10 - a.qty10);
+    .map((r) => ({
+      name: r.name,
+      stock: r.stock,
+      qty30: qty30ByName.get(r.name) ?? 0,
+      qtyPrev30: qtyPrev30ByName.get(r.name) ?? 0,
+    }))
+    .filter((r) => r.qty30 > 0)
+    .sort((a, b) => b.qty30 - a.qty30);
 }
 
-/** Above this many units sold in the last 10 days, an out-of-stock item is urgent enough for a push alert. */
-const URGENT_OUT_OF_STOCK_QTY10_MIN = 10;
+/**
+ * Above this many units sold in the last 30 days, an out-of-stock item is urgent enough
+ * for a push alert (same pace as the old 10-in-10-days rule).
+ */
+const URGENT_OUT_OF_STOCK_QTY30_MIN = 30;
 
 /** Same as `getOutOfStockRecentSellers`, but only the fast movers worth a proactive push alert. */
 export async function getUrgentOutOfStockAlerts(): Promise<OutOfStockRecentSellerRow[]> {
   const rows = await getOutOfStockRecentSellers();
-  return rows.filter((r) => r.qty10 > URGENT_OUT_OF_STOCK_QTY10_MIN);
+  return rows.filter((r) => r.qty30 > URGENT_OUT_OF_STOCK_QTY30_MIN);
 }
 
 export interface YesterdaySoldOutOfStockRow {
@@ -1749,7 +1775,7 @@ export interface YesterdaySoldOutOfStockRow {
 /**
  * Products at zero (or negative) stock today that still sold yesterday — catches a
  * fast-moving item running out overnight even when it hasn't sold enough over the
- * wider 10-day window to trip `getUrgentOutOfStockAlerts`. Meant for the daily
+ * wider 30-day window to trip `getUrgentOutOfStockAlerts`. Meant for the daily
  * morning push, not the on-demand button.
  */
 export async function getYesterdaySoldNowOutOfStock(): Promise<YesterdaySoldOutOfStockRow[]> {
