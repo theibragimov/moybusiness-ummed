@@ -461,6 +461,8 @@ export function getAnalyticsData(from: string, to: string): Promise<AnalyticsDat
 export interface StockSnapshotRow {
   name: string;
   stock: number;
+  /** Ordered from suppliers but not yet received. */
+  inTransit?: number;
   price: number;
 }
 
@@ -1799,6 +1801,226 @@ export async function getYesterdaySoldNowOutOfStock(): Promise<YesterdaySoldOutO
     .map((r) => ({ name: r.name, stock: r.stock, qtyYesterday: qtyByName.get(r.name) ?? 0 }))
     .filter((r) => r.qtyYesterday > 0)
     .sort((a, b) => b.qtyYesterday - a.qtyYesterday);
+}
+
+// ---------- purchase price rises (daily push) ----------
+
+/** A purchase price jump bigger than this (5,000 so'm, in MoySklad's x100 minor unit) is worth flagging. */
+const PRICE_RISE_MIN = 5000 * 100;
+/** Supplies received within this many days are checked for a price jump. */
+const PRICE_RISE_RECENT_DAYS = 30;
+/** How far before the recent window to look for each product's previous purchase price. */
+const PRICE_RISE_PRIOR_DAYS = 180;
+/** Sales in this many days before the price-raising supply give the "old" sale price. */
+const PRICE_RISE_SALES_BEFORE_DAYS = 60;
+/** Bounds the per-product profit-report calls so the cron stays inside its time budget. */
+const PRICE_RISE_MAX_CANDIDATES = 40;
+
+interface SupplyPricePositionRow {
+  price: number;
+  assortment: { meta: { href: string; type: string } };
+}
+
+interface SupplyPriceRow {
+  moment: string;
+  agent?: { name: string };
+  positions?: { rows: SupplyPricePositionRow[] };
+}
+
+interface SupplyReceipt {
+  moment: string;
+  price: number;
+  supplier: string;
+}
+
+function fetchSuppliesWithPrices(from: string, to: string | null, withAgent: boolean): Promise<SupplyPriceRow[]> {
+  const clauses = [`moment>=${from}`];
+  if (to) clauses.push(`moment<${to}`);
+  return fetchAllRows<SupplyPriceRow>(
+    "entity/supply",
+    { filter: buildFilter(clauses), expand: withAgent ? "agent,positions" : "positions", order: "moment,asc" },
+    10000,
+    SUPPLIER_SUPPLY_PAGE_LIMIT
+  );
+}
+
+/** Each product's receipts (oldest first), keyed by product id. Only plain products — services/bundles have no stock price. */
+function receiptsByProduct(supplies: SupplyPriceRow[]): Map<string, SupplyReceipt[]> {
+  const byId = new Map<string, SupplyReceipt[]>();
+  for (const s of supplies) {
+    for (const p of s.positions?.rows ?? []) {
+      if (p.assortment.meta.type !== "product" || p.price <= 0) continue;
+      const id = idFromHref(p.assortment.meta.href);
+      const list = byId.get(id) ?? [];
+      list.push({ moment: s.moment, price: p.price, supplier: s.agent?.name ?? "" });
+      byId.set(id, list);
+    }
+  }
+  return byId;
+}
+
+/**
+ * Last purchase price per product from supplies received before the recent window.
+ * Older supplies never change, and paging them with positions is slow (~7s per 100
+ * documents on this account), so the compact result is cached for a day.
+ */
+function getPriorLastSupplyPrices(): Promise<Record<string, SupplyReceipt>> {
+  const recentFrom = daysAgoYmd(PRICE_RISE_RECENT_DAYS - 1);
+  return cached(
+    `prior-supply-prices:${recentFrom}`,
+    async () => {
+      const supplies = await fetchSuppliesWithPrices(
+        momentFrom(daysAgoYmd(PRICE_RISE_RECENT_DAYS + PRICE_RISE_PRIOR_DAYS - 1)),
+        momentFrom(recentFrom),
+        false
+      );
+      const last: Record<string, SupplyReceipt> = {};
+      for (const [id, receipts] of receiptsByProduct(supplies)) last[id] = receipts[receipts.length - 1];
+      return last;
+    },
+    24 * 60 * 60
+  );
+}
+
+/** "YYYY-MM-DD HH:mm:ss" `days` before a MoySklad moment, staying in the same (Tashkent wall-clock) frame. */
+function momentMinusDays(moment: string, days: number): string {
+  const d = new Date(`${moment.slice(0, 19).replace(" ", "T")}Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
+
+interface ProductSales {
+  name: string;
+  qty: number;
+  avgPrice: number;
+}
+
+async function getProductSales(productId: string, from: string, to: string): Promise<ProductSales | null> {
+  const rows = await fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+    momentFrom: from,
+    momentTo: to,
+    filter: `product=${entityHref("product", productId)}`,
+  }).catch(() => [] as ProfitByProductRow[]);
+  const qty = rows.reduce((s, r) => s + r.sellQuantity, 0);
+  if (qty <= 0) return null;
+  const sum = rows.reduce((s, r) => s + r.sellSum, 0);
+  return { name: rows[0].assortment.name, qty, avgPrice: sum / qty };
+}
+
+export interface PurchasePriceRiseRow {
+  name: string;
+  supplier: string;
+  /** Moment of the supply that brought the higher price. */
+  moment: string;
+  oldCost: number;
+  newCost: number;
+  /** Average sale price in the 60 days before that supply. */
+  salePriceBefore: number;
+  /** Average sale price since that supply. */
+  salePriceAfter: number;
+  qtySoldAfter: number;
+}
+
+/**
+ * Products whose latest purchase (приемка) price, received within the last 30 days,
+ * is more than 5,000 so'm above the one before it — but which have since been
+ * shipped at (near) the old sale price: the average sale price after the supply
+ * rose by less than those same 5,000 so'm. Products not sold since aren't listed —
+ * there's no evidence yet that they're going out at the old price.
+ */
+export async function getPurchasePriceRises(): Promise<PurchasePriceRiseRow[]> {
+  const [recentSupplies, prior] = await Promise.all([
+    fetchSuppliesWithPrices(momentFrom(daysAgoYmd(PRICE_RISE_RECENT_DAYS - 1)), null, true),
+    getPriorLastSupplyPrices(),
+  ]);
+
+  const candidates: { id: string; prev: SupplyReceipt; latest: SupplyReceipt }[] = [];
+  for (const [id, receipts] of receiptsByProduct(recentSupplies)) {
+    const latest = receipts[receipts.length - 1];
+    const prev = receipts.length > 1 ? receipts[receipts.length - 2] : prior[id];
+    if (prev && latest.price - prev.price > PRICE_RISE_MIN) candidates.push({ id, prev, latest });
+  }
+  candidates.sort((a, b) => b.latest.price - b.prev.price - (a.latest.price - a.prev.price));
+
+  const now = momentTo(todayYmd());
+  const rows = await Promise.all(
+    candidates.slice(0, PRICE_RISE_MAX_CANDIDATES).map(async ({ id, prev, latest }) => {
+      const supplyMoment = latest.moment.slice(0, 19);
+      const [before, after] = await Promise.all([
+        getProductSales(id, momentMinusDays(supplyMoment, PRICE_RISE_SALES_BEFORE_DAYS), supplyMoment),
+        getProductSales(id, supplyMoment, now),
+      ]);
+      if (!before || !after || after.avgPrice - before.avgPrice >= PRICE_RISE_MIN) return null;
+      return {
+        name: after.name,
+        supplier: latest.supplier,
+        moment: latest.moment,
+        oldCost: prev.price,
+        newCost: latest.price,
+        salePriceBefore: before.avgPrice,
+        salePriceAfter: after.avgPrice,
+        qtySoldAfter: after.qty,
+      };
+    })
+  );
+  return rows.filter((r): r is PurchasePriceRiseRow => r !== null);
+}
+
+// ---------- purchase plan (Telegram "🛒 Xarid rejasi" button) ----------
+
+/** Sales window the purchase plan sizes orders against: buy enough for the next 15 days at the last 15 days' pace. */
+const PURCHASE_PLAN_DAYS = 15;
+/** Products that sold fewer than this in the window are too slow to plan around. */
+const PURCHASE_PLAN_MIN_QTY = 5;
+
+export interface PurchasePlanRow {
+  name: string;
+  qty15: number;
+  stock: number;
+  inTransit: number;
+  /** Units to order so stock (plus what's already on the way) covers another 15 days. */
+  toOrder: number;
+  /** Days current stock lasts at the 15-day pace. */
+  daysLeft: number;
+  /** Estimated cost of `toOrder` at the product's current cost price (x100 minor unit). */
+  orderCost: number;
+}
+
+/** What to buy and how much: products whose stock + in-transit won't cover another 15 days of sales. */
+export async function getPurchasePlan(): Promise<PurchasePlanRow[]> {
+  const today = todayYmd();
+  const [stockRows, salesRows] = await Promise.all([
+    getStockSnapshot(),
+    fetchAllRows<ProfitByProductRow>("report/profit/byvariant", {
+      momentFrom: momentFrom(daysAgoYmd(PURCHASE_PLAN_DAYS - 1)),
+      momentTo: momentTo(today),
+    }).catch(() => [] as ProfitByProductRow[]),
+  ]);
+
+  const qtyByName = new Map<string, number>();
+  for (const r of salesRows) {
+    if (r.sellQuantity <= 0) continue;
+    qtyByName.set(r.assortment.name, (qtyByName.get(r.assortment.name) ?? 0) + r.sellQuantity);
+  }
+
+  return stockRows
+    .map((r) => {
+      const qty15 = qtyByName.get(r.name) ?? 0;
+      const stock = Math.max(0, r.stock);
+      const inTransit = Math.max(0, r.inTransit ?? 0);
+      const toOrder = Math.ceil(qty15 - stock - inTransit);
+      return {
+        name: r.name,
+        qty15,
+        stock: r.stock,
+        inTransit,
+        toOrder,
+        daysLeft: qty15 > 0 ? stock / (qty15 / PURCHASE_PLAN_DAYS) : Infinity,
+        orderCost: Math.max(0, toOrder) * r.price,
+      };
+    })
+    .filter((r) => r.qty15 >= PURCHASE_PLAN_MIN_QTY && r.toOrder > 0)
+    .sort((a, b) => a.daysLeft - b.daysLeft || b.qty15 - a.qty15);
 }
 
 /** Below this margin (as a fraction, e.g. 0.05 = 5%) a sold line item is flagged. */

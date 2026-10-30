@@ -6,6 +6,7 @@ import {
   getOutOfStockRecentSellers,
   getYesterdaySoldNowOutOfStock,
   getMonthlyComparisonReport,
+  getPurchasePriceRises,
 } from "@/lib/reports";
 import { sendTelegramMessage } from "@/lib/telegram";
 import {
@@ -14,6 +15,7 @@ import {
   buildOosPage,
   buildYesterdaySoldOosPage,
   formatMonthlyComparisonMessage,
+  buildPriceRisePage,
 } from "@/lib/alertMessages";
 import { isLastDayOfMonthTashkent } from "@/lib/tashkent";
 
@@ -41,11 +43,19 @@ function authorized(req: NextRequest): boolean {
 // plan caps a project at 2 cron jobs — this one and the margin check below. The
 // message shows the full current list (not just what's new) so its "Keyingisi ➡️"
 // pagination stays consistent with the on-demand bot buttons.
-async function runStockCheck(): Promise<{ restock: number; outOfStock: number; outOfStockYesterday: number }> {
-  const [restock, urgentOutOfStock, yesterdaySoldOutOfStock] = await Promise.all([
+async function runStockCheck(): Promise<{
+  restock: number;
+  outOfStock: number;
+  outOfStockYesterday: number;
+  priceRises: number;
+}> {
+  const [restock, urgentOutOfStock, yesterdaySoldOutOfStock, priceRises] = await Promise.all([
     getRestockAlerts(),
     getUrgentOutOfStockAlerts(),
     getYesterdaySoldNowOutOfStock(),
+    // Repeats every morning until the sale price is raised (or the product stops
+    // selling) — a nag by design, so a shrinking margin can't be forgotten.
+    getPurchasePriceRises().catch(() => []),
   ]);
   if (restock.length > 0) {
     const page = buildRestockPage(restock);
@@ -60,7 +70,16 @@ async function runStockCheck(): Promise<{ restock: number; outOfStock: number; o
     const page = buildYesterdaySoldOosPage(yesterdaySoldOutOfStock);
     await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
   }
-  return { restock: restock.length, outOfStock: urgentOutOfStock.length, outOfStockYesterday: yesterdaySoldOutOfStock.length };
+  if (priceRises.length > 0) {
+    const page = buildPriceRisePage(priceRises);
+    await sendTelegramMessage(page.text, { replyMarkup: page.keyboard });
+  }
+  return {
+    restock: restock.length,
+    outOfStock: urgentOutOfStock.length,
+    outOfStockYesterday: yesterdaySoldOutOfStock.length,
+    priceRises: priceRises.length,
+  };
 }
 
 async function runMarginCheck(): Promise<{ sent: boolean; count: number }> {

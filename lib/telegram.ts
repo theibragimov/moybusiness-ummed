@@ -62,10 +62,12 @@ export const STOCK_MONEY_BUTTON_LABEL = "💰 Ombor puli";
 export const LOW_MARGIN_PRODUCTS_BUTTON_LABEL = "📉 Past marjali mahsulotlar";
 export const CRM_BUTTON_LABEL = "👥 CRM";
 export const PRODUCT_ANALYSIS_BUTTON_LABEL = "📊 Mahsulotlar bo'yicha tahlil";
+export const PURCHASE_PLAN_BUTTON_LABEL = "🛒 Nima va qancha xarid qilish kerak";
 
 export const MAIN_KEYBOARD: ReplyKeyboard = {
   keyboard: [
     [{ text: OUT_OF_STOCK_BUTTON_LABEL }],
+    [{ text: PURCHASE_PLAN_BUTTON_LABEL }],
     [{ text: STOCK_MONEY_BUTTON_LABEL }],
     [{ text: LOW_MARGIN_PRODUCTS_BUTTON_LABEL }],
     [{ text: CRM_BUTTON_LABEL }],

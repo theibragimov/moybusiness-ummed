@@ -12,12 +12,23 @@ import type {
   StockValueBucket,
   DebtorRow,
   MonthlyComparisonReport,
+  PurchasePriceRiseRow,
+  PurchasePlanRow,
 } from "./reports";
 import { dayOf } from "./tashkent";
 
 export const PAGE_SIZE = 25;
 
-export type PageKind = "restock" | "oos" | "oosYesterday" | "lowmargin" | "bucket" | "debtor30" | "debtor3mo";
+export type PageKind =
+  | "restock"
+  | "oos"
+  | "oosYesterday"
+  | "lowmargin"
+  | "bucket"
+  | "debtor30"
+  | "debtor3mo"
+  | "pricerise"
+  | "purchase";
 
 export interface Page {
   text: string;
@@ -30,7 +41,7 @@ export function encodePageCallback(kind: PageKind, param: string, offset: number
 }
 
 export function parsePageCallback(data: string): { kind: PageKind; param: string; offset: number } | null {
-  const m = /^pg:(restock|oos|oosYesterday|lowmargin|bucket|debtor30|debtor3mo):([a-z-]+):(\d+)$/.exec(data);
+  const m = /^pg:(restock|oos|oosYesterday|lowmargin|bucket|debtor30|debtor3mo|pricerise|purchase):([a-z-]+):(\d+)$/.exec(data);
   if (!m) return null;
   return { kind: m[1] as PageKind, param: m[2], offset: Number(m[3]) };
 }
@@ -47,22 +58,23 @@ function buildPage<T>(
   offset: number,
   formatItem: (row: T, absoluteIndex: number) => string,
   kind: PageKind,
-  param: string
+  param: string,
+  pageSize = PAGE_SIZE
 ): Page {
   if (rows.length === 0) {
     return { text: `${header}\n\n${emptyText}` };
   }
-  const slice = rows.slice(offset, offset + PAGE_SIZE);
+  const slice = rows.slice(offset, offset + pageSize);
   const entries = slice.map((r, i) => formatItem(r, offset + i + 1));
   const rangeEnd = offset + slice.length;
-  const rangeLabel = rows.length > PAGE_SIZE ? ` (${offset + 1}-${rangeEnd} / ${rows.length})` : "";
+  const rangeLabel = rows.length > pageSize ? ` (${offset + 1}-${rangeEnd} / ${rows.length})` : "";
   const remaining = rows.length - rangeEnd;
   const footer = remaining > 0 ? `\n\n📄 Yana ${remaining} ta bor.` : "\n\n✅ Ro'yxat tugadi.";
   const text = `${header}${rangeLabel}\n\n${entries.join("\n\n")}${footer}`;
 
   const buttons: { text: string; callback_data: string }[] = [];
   if (offset > 0) {
-    buttons.push({ text: "⬅️ Orqaga", callback_data: encodePageCallback(kind, param, Math.max(0, offset - PAGE_SIZE)) });
+    buttons.push({ text: "⬅️ Orqaga", callback_data: encodePageCallback(kind, param, Math.max(0, offset - pageSize)) });
   }
   if (rangeEnd < rows.length) {
     buttons.push({ text: "Keyingisi ➡️", callback_data: encodePageCallback(kind, param, rangeEnd) });
@@ -120,6 +132,56 @@ export function buildYesterdaySoldOosPage(rows: YesterdaySoldOutOfStockRow[], of
     offset,
     (r, i) => `${i}. <b>${escapeHtml(r.name)}</b>\n📦 Qoldiq: <b>${formatNumber(r.stock)}</b>\n📈 Kecha sotildi: <b>${formatNumber(r.qtyYesterday)}</b> dona`,
     "oosYesterday",
+    "-"
+  );
+}
+
+const PRICE_RISE_HEADER = "🔺 <b>Kirim narxi oshgan, sotuv narxi o'zgarmagan</b>";
+
+function marginPct(salePrice: number, cost: number): string {
+  return salePrice > 0 ? `${(((salePrice - cost) / salePrice) * 100).toFixed(1)}%` : "-";
+}
+
+export function buildPriceRisePage(rows: PurchasePriceRiseRow[], offset = 0): Page {
+  return buildPage(
+    PRICE_RISE_HEADER,
+    "Kirim narxi 5,000 so'mdan ko'p oshib, eski narxda sotilayotgan mahsulot yo'q.",
+    rows,
+    offset,
+    (r, i) =>
+      `${i}. <b>${escapeHtml(r.name)}</b>\n` +
+      `🛒 Kirim: <b>${formatMoney(r.oldCost)}</b> → <b>${formatMoney(r.newCost)}</b> so'm (+${formatMoney(r.newCost - r.oldCost)})\n` +
+      `🚚 ${dayOf(r.moment)}${r.supplier ? `, ${escapeHtml(r.supplier)}` : ""}\n` +
+      `💵 Sotuv: avval <b>${formatMoney(r.salePriceBefore)}</b>, hozir <b>${formatMoney(r.salePriceAfter)}</b> so'm (${formatNumber(r.qtySoldAfter)} dona)\n` +
+      `📉 Marja: ${marginPct(r.salePriceBefore, r.oldCost)} → <b>${marginPct(r.salePriceAfter, r.newCost)}</b>`,
+    "pricerise",
+    "-",
+    // Each entry runs ~5 lines; 10 keeps a page safely under Telegram's 4096-char cap.
+    10
+  );
+}
+
+export function buildPurchasePlanPage(rows: PurchasePlanRow[], offset = 0): Page {
+  const total = rows.reduce((s, r) => s + r.orderCost, 0);
+  const header =
+    "🛒 <b>Xarid rejasi: nima va qancha olish kerak</b>\n" +
+    `<i>15 kunlik sotuvga yetadigan miqdor. Taxminiy jami: ${formatCompactMoney(total)} so'm</i>`;
+  return buildPage(
+    header,
+    "Hozircha xarid qilish kerak bo'lgan mahsulot yo'q.",
+    rows,
+    offset,
+    (r, i) => {
+      const days = r.daysLeft < 1 ? "1 kundan kam" : `~${Math.floor(r.daysLeft)} kun`;
+      const transit = r.inTransit > 0 ? ` · 🚚 yo'lda: <b>${formatNumber(r.inTransit)}</b>` : "";
+      return (
+        `${i}. <b>${escapeHtml(r.name)}</b>\n` +
+        `📈 15 kunda: <b>${formatNumber(r.qty15)}</b> · 📦 bor: <b>${formatNumber(r.stock)}</b> (${days})${transit}\n` +
+        `🛒 Olish: <b>${formatNumber(r.toOrder)}</b> dona` +
+        (r.orderCost > 0 ? ` (~${formatCompactMoney(r.orderCost)} so'm)` : "")
+      );
+    },
+    "purchase",
     "-"
   );
 }

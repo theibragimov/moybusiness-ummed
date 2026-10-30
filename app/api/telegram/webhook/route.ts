@@ -8,6 +8,8 @@ import {
   getStockBucketProducts,
   getStaleDebtors30d,
   getDormantDebtors3mo,
+  getPurchasePriceRises,
+  getPurchasePlan,
   STOCK_BUCKET_LABELS,
   type StockValueBucket,
 } from "@/lib/reports";
@@ -22,6 +24,7 @@ import {
   LOW_MARGIN_PRODUCTS_BUTTON_LABEL,
   CRM_BUTTON_LABEL,
   PRODUCT_ANALYSIS_BUTTON_LABEL,
+  PURCHASE_PLAN_BUTTON_LABEL,
   MAIN_KEYBOARD,
   type InlineKeyboard,
 } from "@/lib/telegram";
@@ -33,6 +36,8 @@ import {
   buildStockBucketPage,
   buildDebtor30Page,
   buildDebtor3moPage,
+  buildPriceRisePage,
+  buildPurchasePlanPage,
   formatStockMoneyMessage,
   encodePageCallback,
   parsePageCallback,
@@ -108,6 +113,10 @@ async function handleMessage(chatId: number, text: string) {
     const rows = await getOutOfStockRecentSellers();
     const page = buildOosPage(rows);
     await deliver(chatId, placeholderId, page.text, page.keyboard);
+  } else if (text === PURCHASE_PLAN_BUTTON_LABEL) {
+    const placeholderId = await sendPlaceholder(String(chatId));
+    const page = buildPurchasePlanPage(await getPurchasePlan());
+    await deliver(chatId, placeholderId, page.text, page.keyboard);
   } else if (text === LOW_MARGIN_PRODUCTS_BUTTON_LABEL) {
     const placeholderId = await sendPlaceholder(String(chatId));
     const rows = await getLowMarginProducts();
@@ -152,6 +161,12 @@ async function fetchPage(kind: string, param: string, offset: number): Promise<P
   }
   if (kind === "debtor3mo") {
     return buildDebtor3moPage(await getDormantDebtors3mo(), offset);
+  }
+  if (kind === "pricerise") {
+    return buildPriceRisePage(await getPurchasePriceRises(), offset);
+  }
+  if (kind === "purchase") {
+    return buildPurchasePlanPage(await getPurchasePlan(), offset);
   }
   return null;
 }
